@@ -10,7 +10,249 @@ Squid-tools is the open-source post-processing companion for Cephla-Lab/Squid. I
 
 ---
 
-## Architecture: Core Library + Thin Shell (Option B)
+## Cycle 1 Scope: Fully Functional End-to-End
+
+### IN
+
+- Shared data model (OME_TIFF + INDIVIDUAL_IMAGES + ZARR readers)
+- Plugin ABC + wrappers: TileFusion, PetaKit, sep.Background, BasicPy
+- PyQt5 shell: well plate selector, single FOV viewer (ndviewer_light), mosaic view (napari), processing dock panels with all 4 plugins
+- FOV border overlay with intersection/overlap visualization
+- Single FOV ↔ mosaic instant toggle
+- Live transform application (Option B: click Run, result as new layer)
+- OME sidecar output
+- Embeddable widget mode for Squid
+- Unit tests for data model + each plugin + derived metadata
+- Integration tests with synthetic Squid acquisitions
+- Windows .exe build, Linux .AppImage build
+- Cephla logo
+- ruff + mypy enforcement
+
+### OUT (Future Cycles)
+
+- MCP API server (high-throughput scripting interface)
+- Formal OME schema validation and standardization
+- Phase from defocus plugin
+- aCNS denoising plugin (analytical, needs dark frame metadata)
+- Segmentation / brush / polygon annotation tools
+- Cell tracking (transfer learning)
+- Smart Acquisition (CRUK 3D)
+- Navigator integration (downsampled mosaic overview)
+- Auto-generated reader classes for new Squid formats
+- Media Cybernetics metadata interop
+
+---
+
+## GUI Architecture
+
+Thin PyQt5 shell. Informed by NIS Elements (right-click + double-click nested menus, well plate grid), Napari (dock-widget panels, layer-based results), and Harmony (linear pipeline). Avoids QuPath's deep menu nesting.
+
+### Layout
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ [Cephla Logo]  Squid-Tools                      [─][□][×]│
+├──────────────────────────────────────────────────────────┤
+│ [Stitch] [Decon] [BgSub] [Flatfield]   Processing Tabs  │
+├──────────┬───────────────────────────────┬───────────────┤
+│          │                               │               │
+│ Controls │       Viewer Panel            │  Region       │
+│          │                               │  Selector     │
+│ FOV ↔    │  ┌────────┐  ┌──────────┐    │               │
+│ Mosaic   │  │Single  │⇄│ Mosaic   │    │  [A1][A2]     │
+│          │  │FOV View│  │ View     │    │  [B1][B2]     │
+│ Borders  │  └────────┘  └──────────┘    │   ...         │
+│ [show]   │                               │  ────────     │
+│          │  Layers:                      │  or           │
+│ Layers   │  [original] [processed]       │  Region ▾     │
+│ [toggle] │                               │  dropdown     │
+│          │                               │               │
+├──────────┴───────────────────────────────┴───────────────┤
+│ Log: Ready | GPU: NVIDIA RTX 3080 | Mem: 2.1/16 GB      │
+└──────────────────────────────────────────────────────────┘
+```
+
+The region selector auto-detects wellplate vs tissue from `acquisition.yaml` `widget_type` field. Wellplate mode shows a clickable grid. Tissue/flexible mode shows a region dropdown or list.
+
+### Key Interactions
+
+- **Region selector** (right panel): Auto-detects wellplate vs tissue from `acquisition.yaml` `widget_type` field. Wellplate shows clickable grid (adapted from Squid's `ScanCoordinates`). Tissue/flexible shows region dropdown. Click region to load its FOVs.
+- **Processing tabs** (top): One tab per installed plugin. Each tab shows parameter widgets (auto-generated from plugin's Pydantic model) and a Run button. Click Run, result appears as new napari layer.
+- **Controls** (left panel): FOV/Mosaic toggle, border overlay show/hide, layer visibility toggles.
+- **Double-click nested menus**: Double-click on FOV in mosaic opens contextual nested menu with relevant operations (NIS Elements pattern).
+- **Layer-based results**: Each processing result is a new layer. Toggle visibility for before/after comparison.
+- **Tooltips**: On every button, every parameter, every tab header.
+- **Right-click context menus**: Right-click on viewer for operations relevant to the current selection.
+- **Log panel** (bottom): Status, GPU detection, memory usage, processing progress, errors.
+
+### Embeddable Mode
+
+`gui/embed.py` exports `SquidToolsWidget(parent)` that Squid can embed in its dock layout, identical to the current NDViewerTab integration pattern. Uses Qt signals for thread-safe communication with Squid's acquisition controller.
+
+### Mosaic Rendering
+
+Uses **napari + dask.array + tifffile**: the proven microscopy tiling stack. No custom rendering engine.
+
+1. Each FOV is a `dask.delayed` tile placed at its `(x_mm, y_mm)` coordinates via napari `translate` transforms
+2. napari handles viewport-based rendering: only visible tiles are materialized
+3. Zoom out: napari's multiscale support shows lower-resolution versions
+4. Pan: adjacent tiles loaded on demand from the dask/cache pipeline
+5. For very large mosaics (hundreds/thousands of FOVs): Google Maps-style: assemble visible center NxM tiles, load more as user pans/zooms
+
+### FOV Border Overlay
+
+- napari `Shapes` layer with rectangles at each FOV position
+- Color-coded: white = nominal (stage coordinates), green = registered, red = failed
+- Overlap/intersection regions shown as semi-transparent shapes
+- When registration runs and completes (Option B): shapes layer updates with new positions, user toggles layers to compare before/after
+
+### Single FOV / Mosaic Toggle
+
+- Button toggles between single FOV view (ndviewer_light: full 5D navigation) and mosaic view (napari tiled assembly)
+- In mosaic: double-click an FOV to jump to single FOV view of that tile
+- In single FOV: button returns to mosaic at the same region
+
+---
+
+## Plugin Interface (the "Carpenter's Table")
+
+Every processing module implements one class. Wrapping a new algorithm = one file, ~50 lines.
+
+```python
+class ProcessingPlugin(ABC):
+    name: str
+    category: str       # "stitching" | "deconvolution" | "correction" | "phase"
+    requires_gpu: bool = False
+
+    @abstractmethod
+    def parameters(self) -> type[BaseModel]:
+        """Pydantic model defining this plugin's configurable parameters."""
+        ...
+
+    @abstractmethod
+    def validate(self, acq: Acquisition) -> list[str]:
+        """Check if this plugin can run on this data. Return warnings/errors."""
+        ...
+
+    @abstractmethod
+    def process(self, frames: dask.array, params: BaseModel) -> dask.array:
+        """Transform frames. Lazy dask in, lazy dask out."""
+        ...
+
+    @classmethod
+    def default_params(cls, optical: OpticalMetadata) -> BaseModel:
+        """Auto-populate parameters from acquisition metadata."""
+        ...
+
+    @abstractmethod
+    def test_cases(self) -> list[TestCase]:
+        """Synthetic input/expected output pairs for unit tests.
+        Context delegated to the LLM developing this plugin."""
+        ...
+```
+
+### Cycle 1 Plugins
+
+| Plugin | Wraps | GPU | What It Does |
+|--------|-------|-----|-------------|
+| `StitcherPlugin` | TileFusion (maragall/stitcher) | CuPy optional | Tile registration + fusion, OME-TIFF export |
+| `DeconPlugin` | PetaKit (maragall/Deconvolution) | CuPy (CPU fallback) | Richardson-Lucy / OMW deconvolution |
+| `BackgroundPlugin` | sep.Background | No | Background subtraction |
+| `FlatfieldPlugin` | BasicPy (in stitcher) | No | Flatfield illumination correction |
+
+### Plugin Discovery
+
+Via Python entry points: each checked module at install time registers itself:
+
+```toml
+[project.entry-points."squid_tools.plugins"]
+stitcher = "squid_tools.plugins.stitcher:StitcherPlugin"
+decon = "squid_tools.plugins.decon:DeconPlugin"
+background = "squid_tools.plugins.background:BackgroundPlugin"
+flatfield = "squid_tools.plugins.flatfield:FlatfieldPlugin"
+```
+
+### Dev Mode
+
+Plugin development workflow for rapid iteration:
+
+```
+squid-tools --dev                    # launches GUI with dev panel
+squid-tools --dev my_plugin.py       # hot-loads a plugin file
+```
+
+Dev panel features:
+- Load any plugin file (no install needed, just a .py implementing `ProcessingPlugin`)
+- Pick test data: local directory or stream from Zenodo test data registry
+- Run plugin on data, see result as napari layer
+- Validate against `test_cases()` output
+- Parameter widget preview (auto-generated from Pydantic model)
+- Console dock panel for logs/errors
+
+---
+
+## OME Sidecar
+
+Processing results are stored alongside the acquisition in a standardized OME-compatible sidecar structure. Original files are never modified. This follows the OME companion file pattern, where processed outputs and provenance metadata live in a separate directory that any OME-aware tool can discover:
+
+```
+acquisition_2024_01_15/                  # Squid's output (READ-ONLY)
+├── acquisition.yaml
+├── coordinates.csv
+├── ome_tiff/
+└── .squid-tools/                        # Sidecar directory
+    ├── manifest.json                    # Processing provenance
+    └── {plugin_name}/                   # Per-plugin output
+        └── {output files}
+```
+
+### manifest.json
+
+Pydantic model tracking what was run, when, with what parameters:
+
+```json
+{
+  "runs": [
+    {
+      "plugin": "TileFusion Stitcher",
+      "version": "0.3.1",
+      "timestamp": "2026-04-07T14:30:00Z",
+      "params": {"overlap_percent": 15, "registration": true},
+      "input_hash": "sha256:...",
+      "output_path": "stitcher/"
+    }
+  ]
+}
+```
+
+### Memory Footprint
+
+The sidecar must not significantly increase storage:
+- `manifest.json` is metadata only (bytes)
+- Processed frames written only on explicit user "Save" action
+- No duplication of raw data: lazy references until materialized
+- Pipeline state (which transforms were applied, with what params) stored in manifest, not as copied data
+
+---
+
+## Distribution
+
+| Target | Format | How |
+|--------|--------|-----|
+| Windows | `.exe` | PyInstaller (follows ndviewer_light + PetaKit build patterns) |
+| Linux | `.AppImage` | PyInstaller (follows PetaKit pattern) |
+| Squid embed | `pip install` | `pip install squid-tools` or `pip install squid-tools[gpu]` |
+
+### GPU Strategy for Life Scientists
+
+- **Runtime detection**: `try: import cupy` then CPU fallback with status bar message "GPU not detected, running on CPU"
+- **No build-time CUDA dependency**: CuPy wheels include CUDA runtime
+- **Installer checkbox**: "Install GPU support (requires NVIDIA GPU)" with tooltip
+- CuPy/PyTorch optional deps in `[gpu]` extras
+
+---
+
+## Architecture: Core Library + Thin Shell
 
 ```
 squid-tools/
@@ -149,11 +391,11 @@ class FOVPosition(BaseModel):
     z_piezo_um: float | None = None
 
 class Region(BaseModel):
-    region_id: str                                    # "A1", "manual0", etc.
+    region_id: str
     center_mm: tuple[float, float, float]
     shape: Literal["Square", "Rectangle", "Circle", "Manual"]
     fovs: list[FOVPosition]
-    grid_params: GridParams | None = None             # overlap, scan_size if grid
+    grid_params: GridParams | None = None
 
 class ZStackConfig(BaseModel):
     nz: int
@@ -213,7 +455,7 @@ class ZarrReader(FormatReader): ...
 
 Plugins should never recompute physical parameters. All derived values live on the models:
 
-- `objective.pixel_size_um`: dxy at sample plane (sensor × binning × lens_factor)
+- `objective.pixel_size_um`: dxy at sample plane (sensor x binning x lens_factor)
 - `optical.dz_um`: z-step from z_stack config
 - `optical.immersion_ri`: defaulted per medium (water=1.333, oil=1.515, etc.)
 - Channel emission/excitation wavelengths from `AcquisitionChannel`
@@ -249,192 +491,13 @@ Patterns lifted directly from ndviewer_light (proven in production):
 
 ```
 FormatReader.read_frame()
-    → TiffFile Handle Pool (128 max, per-file locks)
-    → dask.delayed(): zero I/O until slice requested
-    → MemoryBoundedLRUCache (256 MB, nbytes-aware eviction)
-    → Plugin.process(): lazy in, lazy out
-    → GUI: debounced napari layer update
-      API: batch materialization to sidecar
+    -> TiffFile Handle Pool (128 max, per-file locks)
+    -> dask.delayed(): zero I/O until slice requested
+    -> MemoryBoundedLRUCache (256 MB, nbytes-aware eviction)
+    -> Plugin.process(): lazy in, lazy out
+    -> GUI: debounced napari layer update
+       API: batch materialization to sidecar
 ```
-
----
-
-## Plugin Interface (the "Carpenter's Table")
-
-Every processing module implements one class. Wrapping a new algorithm = one file, ~50 lines.
-
-```python
-class ProcessingPlugin(ABC):
-    name: str
-    category: str       # "stitching" | "deconvolution" | "correction" | "phase"
-    requires_gpu: bool = False
-
-    @abstractmethod
-    def parameters(self) -> type[BaseModel]:
-        """Pydantic model defining this plugin's configurable parameters."""
-        ...
-
-    @abstractmethod
-    def validate(self, acq: Acquisition) -> list[str]:
-        """Check if this plugin can run on this data. Return warnings/errors."""
-        ...
-
-    @abstractmethod
-    def process(self, frames: dask.array, params: BaseModel) -> dask.array:
-        """Transform frames. Lazy dask in, lazy dask out."""
-        ...
-
-    @classmethod
-    def default_params(cls, optical: OpticalMetadata) -> BaseModel:
-        """Auto-populate parameters from acquisition metadata."""
-        ...
-
-    @abstractmethod
-    def test_cases(self) -> list[TestCase]:
-        """Synthetic input/expected output pairs for unit tests.
-        Context delegated to the LLM developing this plugin."""
-        ...
-```
-
-### Cycle 1 Plugins
-
-| Plugin | Wraps | GPU | What It Does |
-|--------|-------|-----|-------------|
-| `StitcherPlugin` | TileFusion (maragall/stitcher) | CuPy optional | Tile registration + fusion, OME-TIFF export |
-| `DeconPlugin` | PetaKit (maragall/Deconvolution) | CuPy (CPU fallback) | Richardson-Lucy / OMW deconvolution |
-| `BackgroundPlugin` | sep.Background | No | Background subtraction |
-| `FlatfieldPlugin` | BasicPy (in stitcher) | No | Flatfield illumination correction |
-
-### Plugin Discovery
-
-Via Python entry points: each checked module at install time registers itself:
-
-```toml
-[project.entry-points."squid_tools.plugins"]
-stitcher = "squid_tools.plugins.stitcher:StitcherPlugin"
-decon = "squid_tools.plugins.decon:DeconPlugin"
-background = "squid_tools.plugins.background:BackgroundPlugin"
-flatfield = "squid_tools.plugins.flatfield:FlatfieldPlugin"
-```
-
----
-
-## OME Sidecar
-
-Processing results are stored alongside the acquisition in a standardized OME-compatible sidecar structure. Original files are never modified. This follows the OME companion file pattern, where processed outputs and provenance metadata live in a separate directory that any OME-aware tool can discover:
-
-```
-acquisition_2024_01_15/                  # Squid's output (READ-ONLY)
-├── acquisition.yaml
-├── coordinates.csv
-├── ome_tiff/
-└── .squid-tools/                        # Sidecar directory
-    ├── manifest.json                    # Processing provenance
-    └── {plugin_name}/                   # Per-plugin output
-        └── {output files}
-```
-
-### manifest.json
-
-Pydantic model tracking what was run, when, with what parameters:
-
-```json
-{
-  "runs": [
-    {
-      "plugin": "TileFusion Stitcher",
-      "version": "0.3.1",
-      "timestamp": "2026-04-07T14:30:00Z",
-      "params": {"overlap_percent": 15, "registration": true},
-      "input_hash": "sha256:...",
-      "output_path": "stitcher/"
-    }
-  ]
-}
-```
-
-### Memory Footprint
-
-The sidecar must not significantly increase storage:
-- `manifest.json` is metadata only (bytes)
-- Processed frames written only on explicit user "Save" action
-- No duplication of raw data: lazy references until materialized
-- Pipeline state (which transforms were applied, with what params) stored in manifest, not as copied data
-
----
-
-## Mosaic Rendering
-
-Uses **napari + dask.array + tifffile**: the proven microscopy tiling stack. No custom rendering engine.
-
-### How It Works
-
-1. Each FOV is a `dask.delayed` tile placed at its `(x_mm, y_mm)` coordinates via napari `translate` transforms
-2. napari handles viewport-based rendering: only visible tiles are materialized
-3. Zoom out: napari's multiscale support shows lower-resolution versions
-4. Pan: adjacent tiles loaded on demand from the dask/cache pipeline
-5. For very large mosaics (hundreds/thousands of FOVs): Google Maps-style: assemble visible center NxM tiles, load more as user pans/zooms
-
-### FOV Border Overlay
-
-- napari `Shapes` layer with rectangles at each FOV position
-- Color-coded: white = nominal (stage coordinates), green = registered, red = failed
-- Overlap/intersection regions shown as semi-transparent shapes
-- When registration runs and completes (Option B): shapes layer updates with new positions, user toggles layers to compare before/after
-
-### Single FOV ↔ Mosaic Toggle
-
-- Button toggles between single FOV view (ndviewer_light: full 5D navigation) and mosaic view (napari tiled assembly)
-- In mosaic: double-click an FOV to jump to single FOV view of that tile
-- In single FOV: button returns to mosaic at the same region
-
----
-
-## GUI Architecture
-
-Thin PyQt5 shell. Informed by NIS Elements (right-click + double-click nested menus, well plate grid), Napari (dock-widget panels, layer-based results), and Harmony (linear pipeline). Avoids QuPath's deep menu nesting.
-
-### Layout
-
-```
-┌──────────────────────────────────────────────────────────┐
-│ [Cephla Logo]  Squid-Tools                      [─][□][×]│
-├──────────────────────────────────────────────────────────┤
-│ [Stitch] [Decon] [BgSub] [Flatfield]   Processing Tabs  │
-├──────────┬───────────────────────────────┬───────────────┤
-│          │                               │               │
-│ Controls │       Viewer Panel            │  Region       │
-│          │                               │  Selector     │
-│ FOV ↔    │  ┌────────┐  ┌──────────┐    │               │
-│ Mosaic   │  │Single  │⇄│ Mosaic   │    │  [A1][A2]     │
-│          │  │FOV View│  │ View     │    │  [B1][B2]     │
-│ Borders  │  └────────┘  └──────────┘    │   ...         │
-│ [show]   │                               │  ────────     │
-│          │  Layers:                      │  or           │
-│ Layers   │  [original] [processed]       │  Region ▾     │
-│ [toggle] │                               │  dropdown     │
-│          │                               │               │
-├──────────┴───────────────────────────────┴───────────────┤
-│ Log: Ready | GPU: NVIDIA RTX 3080 | Mem: 2.1/16 GB      │
-└──────────────────────────────────────────────────────────┘
-```
-
-The region selector auto-detects wellplate vs tissue from `acquisition.yaml` `widget_type` field. Wellplate mode shows a clickable grid. Tissue/flexible mode shows a region dropdown or list.
-
-### Key Interactions
-
-- **Region selector** (right panel): Auto-detects wellplate vs tissue from `acquisition.yaml` `widget_type` field. Wellplate shows clickable grid (adapted from Squid's `ScanCoordinates`). Tissue/flexible shows region dropdown. Click region to load its FOVs.
-- **Processing tabs** (top): One tab per installed plugin. Each tab shows parameter widgets (auto-generated from plugin's Pydantic model) and a Run button. Click Run, result appears as new napari layer.
-- **Controls** (left panel): FOV/Mosaic toggle, border overlay show/hide, layer visibility toggles.
-- **Double-click nested menus**: Double-click on FOV in mosaic opens contextual nested menu with relevant operations (NIS Elements pattern).
-- **Layer-based results**: Each processing result is a new layer. Toggle visibility for before/after comparison.
-- **Tooltips**: On every button, every parameter, every tab header.
-- **Right-click context menus**: Right-click on viewer for operations relevant to the current selection.
-- **Log panel** (bottom): Status, GPU detection, memory usage, processing progress, errors.
-
-### Embeddable Mode
-
-`gui/embed.py` exports `SquidToolsWidget(parent)` that Squid can embed in its dock layout, identical to the current NDViewerTab integration pattern. Uses Qt signals for thread-safe communication with Squid's acquisition controller.
 
 ---
 
@@ -480,36 +543,11 @@ Creates realistic multi-FOV Squid acquisitions programmatically:
 - Configurable: grid size, channels, z-levels, timepoints
 - Follows image-stitcher's `temporary_image_directory_params()` pattern
 
----
-
-## Dev Mode
-
-Plugin development workflow for rapid iteration:
-
-```
-squid-tools --dev                    # launches GUI with dev panel
-squid-tools --dev my_plugin.py       # hot-loads a plugin file
-```
-
-Dev panel features:
-- Load any plugin file (no install needed, just a .py implementing `ProcessingPlugin`)
-- Pick test data: local directory or stream from Zenodo test data registry
-- Run plugin on data, see result as napari layer
-- Validate against `test_cases()` output
-- Parameter widget preview (auto-generated from Pydantic model)
-- Console dock panel for logs/errors
-
-A plugin developer's workflow: write the class, point dev mode at it, see results on real data. No packaging until ready.
-
----
-
-## Test Data (Zenodo + pooch)
+### Test Data (Zenodo + pooch)
 
 Test data is hosted on Zenodo (free, 50 GB, permanent DOI), not in the git repo. The `pooch` library downloads and caches datasets on first use.
 
-### Zenodo Dataset Organization
-
-Each upload is a zip containing a complete Squid acquisition directory:
+Zenodo datasets:
 
 ```
 ome_tiff_wellplate_3x3.zip          # OME-TIFF, wellplate, 3x3 grid per well
@@ -520,84 +558,9 @@ zarr_hcs_wellplate_96.zip           # Zarr HCS, 96-well plate
 zarr_non_hcs_tissue.zip             # Zarr non-HCS, tissue
 ```
 
-Each zip contains:
-```
-{name}/
-├── acquisition.yaml
-├── coordinates.csv
-├── acquisition parameters.json
-└── {format-specific data files}
-```
-
-### Usage
-
+Usage:
 ```python
 from squid_tools.core.test_data import fetch
-path = fetch("ome_tiff_wellplate_3x3.zip")  # downloads once, caches in ~/.cache/squid-tools/
+path = fetch("ome_tiff_wellplate_3x3.zip")  # downloads once, caches locally
 acq = Acquisition.from_path(Path(path))
 ```
-
-### Setup Steps
-
-1. Go to https://zenodo.org/deposit/new
-2. Create a new deposit for "squid-tools-test-data"
-3. Upload the zip files following the naming convention above
-4. Publish and copy the record DOI
-5. Update `ZENODO_DOI` and `ZENODO_RECORD` in `core/test_data.py`
-6. Update SHA256 hashes in the registry dict
-
-### Limitations
-
-Zenodo + pooch downloads full files (no remote streaming). For unit and integration tests this is the right approach: download once, cache, test on local files. This is the same pattern used by scikit-image, scipy, and napari.
-
-If remote Zarr streaming is needed later (demos, dev mode), Cloudflare R2 (10 GB free, S3-compatible) can be added without changing the test infrastructure.
-
----
-
-## Distribution
-
-| Target | Format | How |
-|--------|--------|-----|
-| Windows | `.exe` | PyInstaller (follows ndviewer_light + PetaKit build patterns) |
-| Linux | `.AppImage` | PyInstaller (follows PetaKit pattern) |
-| Squid embed | `pip install` | `pip install squid-tools` or `pip install squid-tools[gpu]` |
-
-### GPU Strategy for Life Scientists
-
-- **Runtime detection**: `try: import cupy` → CPU fallback with status bar message "GPU not detected, running on CPU"
-- **No build-time CUDA dependency**: CuPy wheels include CUDA runtime
-- **Installer checkbox**: "Install GPU support (requires NVIDIA GPU)" with tooltip
-- CuPy/PyTorch optional deps in `[gpu]` extras
-
----
-
-## Cycle 1 Scope: Fully Functional End-to-End
-
-### IN
-
-- Shared data model (OME_TIFF + INDIVIDUAL_IMAGES + ZARR readers)
-- Plugin ABC + wrappers: TileFusion, PetaKit, sep.Background, BasicPy
-- PyQt5 shell: well plate selector, single FOV viewer (ndviewer_light), mosaic view (napari), processing dock panels with all 4 plugins
-- FOV border overlay with intersection/overlap visualization
-- Single FOV ↔ mosaic instant toggle
-- Live transform application (Option B: click Run, result as new layer)
-- OME sidecar output
-- Embeddable widget mode for Squid
-- Unit tests for data model + each plugin + derived metadata
-- Integration tests with synthetic Squid acquisitions
-- Windows .exe build, Linux .AppImage build
-- Cephla logo
-- ruff + mypy enforcement
-
-### OUT (Future Cycles)
-
-- MCP API server (high-throughput scripting interface)
-- Formal OME schema validation and standardization
-- Phase from defocus plugin
-- aCNS denoising plugin (analytical, needs dark frame metadata)
-- Segmentation / brush / polygon annotation tools
-- Cell tracking (transfer learning)
-- Smart Acquisition (CRUK 3D)
-- Navigator integration (downsampled mosaic overview)
-- Auto-generated reader classes for new Squid formats
-- Media Cybernetics metadata interop
