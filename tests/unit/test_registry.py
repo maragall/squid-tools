@@ -1,6 +1,7 @@
 import pytest
 from pydantic import BaseModel
 
+from squid_tools.core.registry import discover_plugins
 from squid_tools.plugins.base import ProcessingPlugin, TestCase
 
 
@@ -41,3 +42,8 @@ def test_concrete_plugin():
     plugin = DummyPlugin()
     assert plugin.name == "Dummy"
     assert len(plugin.test_cases()) == 1
+
+
+def test_discover_plugins_returns_dict():
+    plugins = discover_plugins()
+    assert isinstance(plugins, dict)
