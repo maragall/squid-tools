@@ -138,3 +138,41 @@ def test_individual_reader_different_channels(individual_wellplate: Path) -> Non
     frame0 = reader.read_frame(individual_wellplate, key_ch0)
     frame1 = reader.read_frame(individual_wellplate, key_ch1)
     assert not np.array_equal(frame0, frame1)
+
+
+# ---------------------------------------------------------------------------
+# OMETiffReader – frame reading
+# ---------------------------------------------------------------------------
+
+def test_ome_tiff_reader_detect(ome_tiff_wellplate: Path) -> None:
+    """OMETiffReader.detect returns True for an ome_tiff/ directory with .ome.tiff files."""
+    from squid_tools.core.readers.ome_tiff import OMETiffReader
+
+    assert OMETiffReader.detect(ome_tiff_wellplate)
+
+
+def test_ome_tiff_reader_read_frame(ome_tiff_wellplate: Path) -> None:
+    """OMETiffReader.read_frame returns a 2-D uint16 frame of the expected shape."""
+    from squid_tools.core.readers.ome_tiff import OMETiffReader
+    from squid_tools.core.data_model import FrameKey
+
+    reader = OMETiffReader()
+    # Fixture: 2 regions (R0, R1), 3x3 grid → fov indices 0..8
+    key = FrameKey(region="R0", fov=0, z=0, channel=0, timepoint=0)
+    frame = reader.read_frame(ome_tiff_wellplate, key)
+    assert frame.shape == (256, 256)
+    assert frame.dtype == np.uint16
+
+
+def test_ome_tiff_reader_z_channel_indexing(ome_tiff_wellplate: Path) -> None:
+    """Frames at different z-slices contain distinct pixel data."""
+    from squid_tools.core.readers.ome_tiff import OMETiffReader
+    from squid_tools.core.data_model import FrameKey
+
+    reader = OMETiffReader()
+    # Fixture has nz=2; z=0 and z=1 should differ
+    key_z0 = FrameKey(region="R0", fov=0, z=0, channel=0, timepoint=0)
+    key_z1 = FrameKey(region="R0", fov=0, z=1, channel=0, timepoint=0)
+    frame_z0 = reader.read_frame(ome_tiff_wellplate, key_z0)
+    frame_z1 = reader.read_frame(ome_tiff_wellplate, key_z1)
+    assert not np.array_equal(frame_z0, frame_z1)
