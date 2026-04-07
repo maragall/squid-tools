@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from squid_tools.core.data_model import AcquisitionFormat, AcquisitionMode
@@ -105,3 +106,35 @@ def test_open_acquisition_pixel_size(individual_wellplate: Path) -> None:
     expected = 1.85 * 1 * (180.0 / 20.0 / 180.0)
     assert acq.objective.pixel_size_um == pytest.approx(expected, rel=1e-6)
     assert acq.optical.pixel_size_um == pytest.approx(expected, rel=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# IndividualImageReader – frame reading
+# ---------------------------------------------------------------------------
+
+def test_individual_reader_read_frame(individual_wellplate: Path) -> None:
+    """IndividualImageReader.read_frame returns the correct frame shape and dtype."""
+    from squid_tools.core.readers.individual import IndividualImageReader
+    from squid_tools.core.data_model import FrameKey
+
+    reader = IndividualImageReader()
+    assert reader.detect(individual_wellplate)
+
+    # Fixture: nz=2 → z-suffixed filenames; region R0, fov 0, z 0, ch 0, t 0
+    key = FrameKey(region="R0", fov=0, z=0, channel=0, timepoint=0)
+    frame = reader.read_frame(individual_wellplate, key)
+    assert frame.shape == (256, 256)
+    assert frame.dtype == np.uint16
+
+
+def test_individual_reader_different_channels(individual_wellplate: Path) -> None:
+    """Frames from different channels contain distinct pixel data."""
+    from squid_tools.core.readers.individual import IndividualImageReader
+    from squid_tools.core.data_model import FrameKey
+
+    reader = IndividualImageReader()
+    key_ch0 = FrameKey(region="R0", fov=0, z=0, channel=0, timepoint=0)
+    key_ch1 = FrameKey(region="R0", fov=0, z=0, channel=1, timepoint=0)
+    frame0 = reader.read_frame(individual_wellplate, key_ch0)
+    frame1 = reader.read_frame(individual_wellplate, key_ch1)
+    assert not np.array_equal(frame0, frame1)
