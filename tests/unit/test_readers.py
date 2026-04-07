@@ -114,8 +114,8 @@ def test_open_acquisition_pixel_size(individual_wellplate: Path) -> None:
 
 def test_individual_reader_read_frame(individual_wellplate: Path) -> None:
     """IndividualImageReader.read_frame returns the correct frame shape and dtype."""
-    from squid_tools.core.readers.individual import IndividualImageReader
     from squid_tools.core.data_model import FrameKey
+    from squid_tools.core.readers.individual import IndividualImageReader
 
     reader = IndividualImageReader()
     assert reader.detect(individual_wellplate)
@@ -129,8 +129,8 @@ def test_individual_reader_read_frame(individual_wellplate: Path) -> None:
 
 def test_individual_reader_different_channels(individual_wellplate: Path) -> None:
     """Frames from different channels contain distinct pixel data."""
-    from squid_tools.core.readers.individual import IndividualImageReader
     from squid_tools.core.data_model import FrameKey
+    from squid_tools.core.readers.individual import IndividualImageReader
 
     reader = IndividualImageReader()
     key_ch0 = FrameKey(region="R0", fov=0, z=0, channel=0, timepoint=0)
@@ -153,8 +153,8 @@ def test_ome_tiff_reader_detect(ome_tiff_wellplate: Path) -> None:
 
 def test_ome_tiff_reader_read_frame(ome_tiff_wellplate: Path) -> None:
     """OMETiffReader.read_frame returns a 2-D uint16 frame of the expected shape."""
-    from squid_tools.core.readers.ome_tiff import OMETiffReader
     from squid_tools.core.data_model import FrameKey
+    from squid_tools.core.readers.ome_tiff import OMETiffReader
 
     reader = OMETiffReader()
     # Fixture: 2 regions (R0, R1), 3x3 grid → fov indices 0..8
@@ -166,8 +166,8 @@ def test_ome_tiff_reader_read_frame(ome_tiff_wellplate: Path) -> None:
 
 def test_ome_tiff_reader_z_channel_indexing(ome_tiff_wellplate: Path) -> None:
     """Frames at different z-slices contain distinct pixel data."""
-    from squid_tools.core.readers.ome_tiff import OMETiffReader
     from squid_tools.core.data_model import FrameKey
+    from squid_tools.core.readers.ome_tiff import OMETiffReader
 
     reader = OMETiffReader()
     # Fixture has nz=2; z=0 and z=1 should differ

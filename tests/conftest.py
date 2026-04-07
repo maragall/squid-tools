@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -15,9 +14,8 @@ from tests.fixtures.generate_fixtures import create_test_acquisition
 
 def _check_gpu_available() -> bool:
     try:
-        import cupy  # noqa: F401
         import cupy as cp
-        cp.cuda.Device(0).compute_capability  # triggers a real CUDA check
+        _ = cp.cuda.Device(0).compute_capability  # triggers a real CUDA check
         return True
     except Exception:
         return False

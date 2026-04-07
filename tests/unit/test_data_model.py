@@ -1,17 +1,17 @@
 from squid_tools.core.data_model import (
+    Acquisition,
+    AcquisitionChannel,
     AcquisitionFormat,
     AcquisitionMode,
+    FOVPosition,
+    FrameKey,
+    GridParams,
     ObjectiveMetadata,
     OpticalMetadata,
-    AcquisitionChannel,
-    ScanConfig,
-    GridParams,
-    FrameKey,
-    FOVPosition,
     Region,
-    ZStackConfig,
+    ScanConfig,
     TimeSeriesConfig,
-    Acquisition,
+    ZStackConfig,
 )
 
 

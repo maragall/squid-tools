@@ -1,0 +1,2 @@
+- [Julio Profile](user_julio_profile.md) — builds open-source post-processing suite for Cephla-Lab Squid, drug discovery market
+- [Squid-Tools Context](project_squid_tools_context.md) — architecture decisions, module list, format standardization, connector philosophy

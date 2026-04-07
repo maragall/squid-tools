@@ -6,6 +6,7 @@ each plugin in its own tab.
 
 from __future__ import annotations
 
+import contextlib
 from typing import Any
 
 from pydantic import BaseModel
@@ -68,10 +69,8 @@ class PluginTab(QWidget):
                 sb = QSpinBox()
                 sb.setRange(-2_147_483_648, 2_147_483_647)
                 if default is not None:
-                    try:
+                    with contextlib.suppress(TypeError, ValueError):
                         sb.setValue(int(default))
-                    except (TypeError, ValueError):
-                        pass
                 sb.setToolTip(field_info.description or f"Integer value for {field_name}")
                 widget = sb
             else:
@@ -80,10 +79,8 @@ class PluginTab(QWidget):
                 dsb.setRange(-1e12, 1e12)
                 dsb.setDecimals(4)
                 if default is not None:
-                    try:
+                    with contextlib.suppress(TypeError, ValueError):
                         dsb.setValue(float(default))
-                    except (TypeError, ValueError):
-                        pass
                 dsb.setToolTip(field_info.description or f"Float value for {field_name}")
                 widget = dsb
 
@@ -107,9 +104,7 @@ class PluginTab(QWidget):
         for field_name, widget in self._widgets.items():
             if isinstance(widget, QCheckBox):
                 kwargs[field_name] = widget.isChecked()
-            elif isinstance(widget, QSpinBox):
-                kwargs[field_name] = widget.value()
-            elif isinstance(widget, QDoubleSpinBox):
+            elif isinstance(widget, (QSpinBox, QDoubleSpinBox)):
                 kwargs[field_name] = widget.value()
         return self._param_cls(**kwargs)
 
