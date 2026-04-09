@@ -7,7 +7,6 @@ import pytest
 
 from squid_tools.plugins.decon import DeconParams, DeconPlugin
 
-
 # ---------------------------------------------------------------------------
 # Plugin attribute tests
 # ---------------------------------------------------------------------------
@@ -129,7 +128,6 @@ def test_build_psf_fallback_without_petakit():
     from squid_tools.plugins.decon import _gaussian_psf
 
     # Directly exercise the Gaussian fallback
-    params = DeconParams()
     nz = 8
     psf = _gaussian_psf(nz=nz, nxy=31)
 
@@ -158,9 +156,10 @@ def test_process_skips_without_petakit():
     )
 
     # Mock petakit as unavailable in _check_petakit
-    with mock.patch.dict(sys.modules, {"petakit": None}):
-        with pytest.raises(ImportError, match="PetaKit is not installed"):
-            plugin.process(frames, params)
+    patch_ctx = mock.patch.dict(sys.modules, {"petakit": None})
+    raises_ctx = pytest.raises(ImportError, match="PetaKit is not installed")
+    with patch_ctx, raises_ctx:
+        plugin.process(frames, params)
 
 
 def test_process_with_petakit_synthetic():
@@ -230,6 +229,8 @@ def test_decon_improves_sharpness_synthetic():
 
 
 def test_validate_warns_without_zstack():
+    from pathlib import Path
+
     from squid_tools.core.data_model import (
         Acquisition,
         AcquisitionChannel,
@@ -242,7 +243,6 @@ def test_validate_warns_without_zstack():
         Region,
         ScanConfig,
     )
-    from pathlib import Path
 
     objective = ObjectiveMetadata(
         name="10x",
