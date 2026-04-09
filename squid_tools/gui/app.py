@@ -15,19 +15,17 @@ from PyQt5.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
-    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from squid_tools.core.data_model import Acquisition
 from squid_tools.core.readers import open_acquisition
 from squid_tools.core.registry import discover_plugins
 from squid_tools.gui.controls import ControlsPanel
 from squid_tools.gui.log_panel import LogPanel
 from squid_tools.gui.processing_tabs import ProcessingTabs
 from squid_tools.gui.theme import STYLESHEET
-from squid_tools.gui.viewer import UnifiedViewer
+from squid_tools.gui.viewer import ViewerWidget
 from squid_tools.gui.wellplate import RegionSelector
 
 _LOGO_PATH = Path(__file__).parent / "cephla_logo.svg"
@@ -38,7 +36,7 @@ class MainWindow(QMainWindow):
     _MIN_WIDTH = 1200
     _MIN_HEIGHT = 800
 
-    def __init__(self) -> None:
+    def __init__(self, open_path: str | None = None) -> None:
         super().__init__()
         self.setWindowTitle("Squid-Tools")
         self.setMinimumSize(self._MIN_WIDTH, self._MIN_HEIGHT)
@@ -75,18 +73,9 @@ class MainWindow(QMainWindow):
         self._controls = ControlsPanel()
         middle.addWidget(self._controls)
 
-        # Viewer: placeholder until acquisition loaded, then unified viewer
-        self._stack = QStackedWidget()
-        self._placeholder = QLabel("Open an acquisition to begin")
-        self._placeholder.setAlignment(Qt.AlignCenter)
-        self._placeholder.setStyleSheet(
-            "QLabel { background-color: #1e1e1e; color: #666;"
-            "border: 1px solid #555; font-size: 14pt; }"
-        )
-        self._stack.addWidget(self._placeholder)  # index 0
-
-        self._viewer: UnifiedViewer | None = None
-        middle.addWidget(self._stack, stretch=1)
+        # ndviewer_light viewer (the core)
+        self._viewer = ViewerWidget()
+        middle.addWidget(self._viewer.widget, stretch=1)
 
         self._region_selector = RegionSelector()
         middle.addWidget(self._region_selector)
@@ -105,9 +94,6 @@ class MainWindow(QMainWindow):
         for p in plugins.values():
             self._tabs.add_plugin(p)
 
-        # State
-        self._acq: Acquisition | None = None
-
         # Signals
         self._controls.view_mode_changed.connect(self._on_mode)
         self._controls.borders_toggled.connect(self._on_borders)
@@ -115,6 +101,10 @@ class MainWindow(QMainWindow):
         self._tabs.run_requested.connect(self._on_run)
 
         self._log.set_status("Ready")
+
+        # Auto-open if path provided
+        if open_path:
+            self._open_path(open_path)
 
     def _build_menu(self) -> None:
         menu = self.menuBar()
@@ -133,42 +123,29 @@ class MainWindow(QMainWindow):
         q.triggered.connect(QApplication.instance().quit)
         f.addAction(q)
 
-    def _ensure_viewer(self) -> UnifiedViewer:
-        if self._viewer is None:
-            self._viewer = UnifiedViewer()
-            self._stack.addWidget(self._viewer.widget)  # index 1
-        self._stack.setCurrentIndex(1)
-        return self._viewer
-
-    def _on_open(self) -> None:
-        path = QFileDialog.getExistingDirectory(self, "Open Acquisition Directory")
-        if not path:
-            return
+    def _open_path(self, path: str) -> None:
         self._log.set_status(f"Opening: {path}")
         try:
-            acq = open_acquisition(path)
-            self._acq = acq
+            acq = open_acquisition(Path(path))
             self._region_selector.set_acquisition(acq)
-            v = self._ensure_viewer()
-            first = next(iter(acq.regions))
-            v.set_acquisition(acq, first)
+            self._viewer.load_acquisition(acq)
             self._log.set_status(f"Loaded: {Path(path).name} ({len(acq.regions)} region(s))")
         except Exception as exc:  # noqa: BLE001
             self._log.set_status(f"Error: {exc}")
 
+    def _on_open(self) -> None:
+        path = QFileDialog.getExistingDirectory(self, "Open Acquisition Directory")
+        if path:
+            self._open_path(path)
+
     def _on_mode(self, mode: str) -> None:
-        if self._viewer:
-            self._viewer.set_mode(mode)
         self._log.set_status(f"View: {mode}")
 
     def _on_borders(self, on: bool) -> None:
-        if self._viewer:
-            self._viewer.show_borders(on)
+        pass  # TODO: wire to mosaic overlay
 
     def _on_region(self, region_id: str) -> None:
-        if self._acq and self._viewer:
-            self._viewer.set_acquisition(self._acq, region_id)
-            self._log.set_status(f"Region: {region_id}")
+        self._log.set_status(f"Region: {region_id}")
 
     def _on_run(self, name: str, params: object) -> None:
         self._log.set_status(f"Running {name}...")
@@ -178,7 +155,10 @@ def main() -> None:
     app = QApplication(sys.argv)
     app.setApplicationName("Squid-Tools")
     app.setStyleSheet(STYLESHEET)
-    window = MainWindow()
+
+    # Accept optional path argument
+    open_path = sys.argv[1] if len(sys.argv) > 1 else None
+    window = MainWindow(open_path=open_path)
     window.show()
     sys.exit(app.exec_())
 

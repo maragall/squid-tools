@@ -1,164 +1,76 @@
-"""Unified viewer: single FOV and mosaic in one napari canvas.
+"""Viewer widget wrapping ndviewer_light's LightweightViewer.
 
-One viewer, one button toggles mode. Colors and contrast are retained
-across transitions. Data loading uses memory-bounded caching.
+ndviewer_light provides the production-grade 5D viewer with lazy loading,
+memory-bounded caching, FOV/time/channel navigation, and processing support.
+This module embeds it directly as the squid-tools viewer.
 """
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
-
-import dask
-import dask.array as da
-import numpy as np
+from pathlib import Path
 
 from squid_tools.core.data_model import Acquisition
-from squid_tools.gui.mosaic import (
-    _build_border_rectangles,
-    _build_tile_layers,
-    _probe_tile_shape_dtype,
-    _read_frame_for_acq,
-)
-
-if TYPE_CHECKING:
-    from PyQt5.QtWidgets import QWidget
 
 logger = logging.getLogger(__name__)
 
-_COLORMAPS = ["gray", "green", "magenta", "cyan", "yellow", "red"]
+
+def create_viewer(parent=None):  # type: ignore[no-untyped-def]
+    """Create the viewer widget. Returns (widget, is_ndviewer_light)."""
+    try:
+        from ndviewer_light.core import LightweightViewer
+
+        viewer = LightweightViewer()
+        logger.info("Using ndviewer_light LightweightViewer")
+        return viewer, True
+    except ImportError:
+        from PyQt5.QtCore import Qt
+        from PyQt5.QtWidgets import QLabel
+
+        placeholder = QLabel("ndviewer_light not installed.\npip install ndviewer_light")
+        placeholder.setAlignment(Qt.AlignCenter)
+        placeholder.setStyleSheet("color: #888; font-size: 12pt;")
+        logger.warning("ndviewer_light not available")
+        return placeholder, False
 
 
-class UnifiedViewer:
-    """Single napari viewer that toggles between FOV and mosaic modes.
+class ViewerWidget:
+    """Wraps ndviewer_light's LightweightViewer as the squid-tools viewer.
 
-    Same canvas, same colors, seamless transition.
+    LightweightViewer is a QWidget that handles:
+    - Loading acquisitions via load_dataset(path)
+    - FOV navigation (slider)
+    - Time navigation (slider)
+    - Channel composite display
+    - Memory-bounded LRU cache
+    - TiffFile handle pool (128 max)
+    - Dask lazy loading with debouncing
     """
 
     def __init__(self) -> None:
-        import napari
-
-        self._viewer = napari.Viewer(show=False)
-        self._qt_widget: QWidget = self._viewer.window._qt_window
-
+        self._widget, self._is_ndviewer = create_viewer()
         self._acq: Acquisition | None = None
-        self._region_id: str | None = None
-        self._fov_index: int = 0
-        self._mode: str = "fov"
-        self._borders_visible: bool = False
-
-        # Persist contrast/colormap across mode switches
-        self._channel_contrast: dict[int, tuple[float, float]] = {}
-        self._channel_colormaps: dict[int, str] = {}
 
     @property
-    def widget(self) -> QWidget:
-        return self._qt_widget
+    def widget(self):  # type: ignore[no-untyped-def]
+        return self._widget
 
-    def set_acquisition(self, acq: Acquisition, region_id: str) -> None:
+    @property
+    def is_ready(self) -> bool:
+        return self._is_ndviewer
+
+    def load_acquisition(self, acq: Acquisition) -> None:
+        """Load an acquisition into the viewer."""
         self._acq = acq
-        self._region_id = region_id
-        self._fov_index = 0
-        self._refresh()
+        if self._is_ndviewer:
+            self._widget.load_dataset(str(acq.path))
 
-    def set_mode(self, mode: str) -> None:
-        if mode == self._mode:
-            return
-        self._save_contrast()
-        self._mode = mode
-        self._refresh()
+    def load_fov(self, fov_index: int) -> None:
+        """Navigate to a specific FOV."""
+        if self._is_ndviewer:
+            self._widget.load_fov(fov_index)
 
-    def set_fov(self, fov_index: int) -> None:
-        self._fov_index = fov_index
-        if self._mode == "fov":
-            self._save_contrast()
-            self._refresh()
-
-    def show_borders(self, visible: bool) -> None:
-        self._borders_visible = visible
-        for layer in self._viewer.layers:
-            if layer.name == "FOV Borders":
-                layer.visible = visible
-                return
-
-    def _save_contrast(self) -> None:
-        for layer in self._viewer.layers:
-            if hasattr(layer, "contrast_limits") and layer.name != "FOV Borders":
-                try:
-                    idx = int(layer.metadata.get("ch_idx", -1))
-                    if idx >= 0:
-                        self._channel_contrast[idx] = tuple(layer.contrast_limits)
-                        self._channel_colormaps[idx] = str(layer.colormap.name)
-                except (ValueError, AttributeError):
-                    pass
-
-    def _refresh(self) -> None:
-        if self._acq is None or self._region_id is None:
-            return
-
-        self._viewer.layers.clear()
-
-        if self._mode == "fov":
-            self._load_fov()
-        else:
-            self._load_mosaic()
-
-        self._viewer.reset_view()
-
-    def _load_fov(self) -> None:
-        acq = self._acq
-        assert acq is not None
-        region_id = self._region_id
-        assert region_id is not None
-
-        tile_shape, tile_dtype = _probe_tile_shape_dtype(acq, region_id)
-
-        for ch_idx, ch in enumerate(acq.channels):
-            delayed = dask.delayed(_read_frame_for_acq)(
-                acq, region_id, self._fov_index, ch_idx
-            )
-            arr = da.from_delayed(delayed, shape=tile_shape, dtype=tile_dtype)
-
-            cmap = self._channel_colormaps.get(ch_idx, _COLORMAPS[ch_idx % len(_COLORMAPS)])
-            layer = self._viewer.add_image(
-                arr,
-                name=ch.name,
-                colormap=cmap,
-                blending="additive",
-                visible=True,
-                metadata={"ch_idx": ch_idx},
-            )
-            if ch_idx in self._channel_contrast:
-                layer.contrast_limits = self._channel_contrast[ch_idx]
-
-    def _load_mosaic(self) -> None:
-        acq = self._acq
-        assert acq is not None
-        region_id = self._region_id
-        assert region_id is not None
-
-        # Load channel 0 mosaic (most common use)
-        tiles = _build_tile_layers(acq, region_id, channel=0)
-
-        for tile in tiles:
-            layer = self._viewer.add_image(
-                tile.dask_data,
-                name=f"FOV_{tile.fov_index:03d}",
-                translate=tile.translate_yx,
-                blending="translucent",
-                visible=True,
-                metadata={"ch_idx": 0},
-            )
-            if 0 in self._channel_contrast:
-                layer.contrast_limits = self._channel_contrast[0]
-
-        rects = _build_border_rectangles(tiles)
-        if rects:
-            self._viewer.add_shapes(
-                rects,
-                shape_type="rectangle",
-                name="FOV Borders",
-                edge_color="white",
-                edge_width=2,
-                face_color="transparent",
-                visible=self._borders_visible,
-            )
+    def get_xarray_data(self):  # type: ignore[no-untyped-def]
+        """Get the current xarray data for processing."""
+        if self._is_ndviewer and hasattr(self._widget, '_xarray_data'):
+            return self._widget._xarray_data
+        return None
