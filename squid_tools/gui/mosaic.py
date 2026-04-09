@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import dask
 import dask.array as da
@@ -19,6 +19,7 @@ from squid_tools.core.data_model import (
     Acquisition,
     AcquisitionFormat,
     FrameKey,
+    Region,
 )
 from squid_tools.core.readers.individual import IndividualImageReader
 from squid_tools.core.readers.ome_tiff import OMETiffReader
@@ -257,7 +258,7 @@ class MosaicWidget:
         )
 
         # Determine a shared contrast range for nice defaults
-        for i, tile in enumerate(self._tiles):
+        for _i, tile in enumerate(self._tiles):
             self._viewer.add_image(
                 tile.dask_data,
                 name=f"FOV_{tile.fov_index:03d}",
@@ -280,3 +281,106 @@ class MosaicWidget:
             )
 
         self._viewer.reset_view()
+
+
+# ---------------------------------------------------------------------------
+# Coordinate-placement helpers (testable without napari)
+# ---------------------------------------------------------------------------
+
+
+def compute_tile_positions(
+    region: Region,
+    pixel_size_um: float,
+    tile_shape: tuple[int, int],
+) -> list[dict[str, Any]]:
+    """Compute napari translate transforms for each FOV in a region.
+
+    Converts mm stage coordinates to pixel coordinates for napari placement.
+
+    Returns list of dicts with keys: fov_index, translate_yx (pixels), x_mm, y_mm
+    """
+    positions = []
+    for fov in region.fovs:
+        # Convert mm to pixels: mm * 1000 = um, um / pixel_size_um = pixels
+        y_px = fov.y_mm * 1000.0 / pixel_size_um
+        x_px = fov.x_mm * 1000.0 / pixel_size_um
+        positions.append({
+            "fov_index": fov.fov_index,
+            "translate_yx": (y_px, x_px),
+            "x_mm": fov.x_mm,
+            "y_mm": fov.y_mm,
+        })
+    return positions
+
+
+def compute_fov_border_rectangles(
+    positions: list[dict[str, Any]],
+    tile_shape: tuple[int, int],
+) -> np.ndarray:
+    """Compute rectangle vertices for FOV borders.
+
+    Returns array of shape (N, 4, 2) where N is number of FOVs,
+    4 is corners (top-left, top-right, bottom-right, bottom-left),
+    2 is (y, x) in pixel coordinates.
+    """
+    h, w = tile_shape
+    rectangles = []
+    for pos in positions:
+        y0, x0 = pos["translate_yx"]
+        rect = np.array([
+            [y0, x0],          # top-left
+            [y0, x0 + w],      # top-right
+            [y0 + h, x0 + w],  # bottom-right
+            [y0 + h, x0],      # bottom-left
+        ])
+        rectangles.append(rect)
+    return np.array(rectangles) if rectangles else np.empty((0, 4, 2))
+
+
+class MosaicAssembler:
+    """Assembles a mosaic from FOV tiles placed at stage coordinates.
+
+    This is the data layer - it computes positions and creates dask arrays.
+    The napari viewer integration happens in add_to_viewer().
+    """
+
+    def __init__(self, acquisition: Acquisition, region_id: str) -> None:
+        self._acq = acquisition
+        self._region = acquisition.regions[region_id]
+        self._pixel_size_um = acquisition.objective.pixel_size_um
+
+    @property
+    def region(self) -> Region:
+        return self._region
+
+    def tile_positions(self, tile_shape: tuple[int, int] = (256, 256)) -> list[dict[str, Any]]:
+        return compute_tile_positions(self._region, self._pixel_size_um, tile_shape)
+
+    def border_rectangles(self, tile_shape: tuple[int, int] = (256, 256)) -> np.ndarray:
+        positions = self.tile_positions(tile_shape)
+        return compute_fov_border_rectangles(positions, tile_shape)
+
+    def add_to_viewer(self, viewer: Any, channel: int = 0, z: int = 0, t: int = 0) -> None:
+        """Add mosaic tiles and borders to a napari viewer.
+
+        Each FOV becomes a separate napari Image layer with translate transform.
+        Borders are a single Shapes layer.
+        """
+        import napari  # noqa: F401  # runtime import
+
+        tile_shape = (256, 256)  # default, will be updated from first frame
+        borders = self.border_rectangles(tile_shape)
+
+        # Add border overlay
+        if len(borders) > 0:
+            viewer.add_shapes(
+                borders,
+                shape_type="rectangle",
+                edge_color="white",
+                edge_width=2,
+                face_color="transparent",
+                name=f"FOV Borders ({self._region.region_id})",
+            )
+
+    def fov_count(self) -> int:
+        return len(self._region.fovs)
