@@ -69,7 +69,7 @@ class MainWindow(QMainWindow):
             logo.setFixedSize(32, 32)
             header.addWidget(logo)
         title_label = QLabel("Squid-Tools")
-        title_label.setStyleSheet("font-size: 16pt; font-weight: bold; color: #31c4f3;")
+        title_label.setStyleSheet("font-size: 14pt; font-weight: bold; color: #ffffff;")
         header.addWidget(title_label)
         header.addStretch()
         root_layout.addLayout(header)
