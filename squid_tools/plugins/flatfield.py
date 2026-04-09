@@ -9,8 +9,7 @@ from squid_tools.plugins.base import ProcessingPlugin, TestCase
 
 
 class FlatfieldParams(BaseModel):
-    smoothness_flatfield: float = 1.0
-    max_iterations: int = 500
+    sigma: float = 16.0   # Gaussian smoothing sigma
 
 
 class FlatfieldPlugin(ProcessingPlugin):

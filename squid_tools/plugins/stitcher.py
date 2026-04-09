@@ -18,11 +18,20 @@ from squid_tools.plugins.base import ProcessingPlugin, TestCase
 
 
 class StitcherParams(BaseModel):
-    overlap_percent: float = 15.0
-    registration: bool = True
+    # Flatfield
+    flatfield_correction: bool = False
+    darkfield_correction: bool = False
+    # Registration
+    registration_refinement: bool = False
+    registration_downsample: int = 2        # 1-8
+    registration_z: int = 0                 # reference z-plane
+    registration_timepoint: int = 0         # reference timepoint
+    registration_channel: int = 0           # reference channel index
+    # Blending
+    blending: bool = False
+    blend_pixels: int = 50                  # 1-500, overlap blend width
+    # Output
     output_format: str = "OME_TIFF"
-    blend_pixels: int = 0
-    channel_to_use: int = 0
 
 
 class StitcherPlugin(ProcessingPlugin):
@@ -86,7 +95,7 @@ class StitcherPlugin(ProcessingPlugin):
         np.ndarray
             Stitched 2-D image.
         """
-        if params.registration:
+        if params.registration_refinement:
             try:
                 return _stitch_with_tilefusion(tiles, positions_px, tile_shape, params)
             except ImportError:

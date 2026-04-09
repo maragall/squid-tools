@@ -39,11 +39,10 @@ def test_decon_plugin_test_cases():
 
 def test_decon_params_defaults():
     params = DeconParams()
-    assert params.modality == "widefield"
-    assert params.iterations == 10
-    assert params.regularization == 0.001
     assert params.method in ("omw", "rl")
-    assert params.use_gpu is True
+    assert params.iterations == 2
+    assert params.force_cpu is False
+    assert params.channel == 0
 
 
 # ---------------------------------------------------------------------------
@@ -84,11 +83,11 @@ def test_default_params_autofill_pixel_size():
     assert params.pixel_size_um == pytest.approx(0.325)
 
 
-def test_default_params_autofill_modality():
+def test_default_params_autofill_immersion_ri():
     plugin = DeconPlugin()
-    optical = _make_optical(modality="confocal")
+    optical = _make_optical()
     params = plugin.default_params(optical)
-    assert params.modality == "confocal"
+    assert params.immersion_ri == 1.0
 
 
 def test_default_params_autofill_dz():
@@ -131,7 +130,7 @@ def test_build_psf_fallback_without_petakit():
 
     # Directly exercise the Gaussian fallback
     params = DeconParams()
-    nz = max(params.nz_psf if params.nz_psf > 0 else 8, 3)
+    nz = 8
     psf = _gaussian_psf(nz=nz, nxy=31)
 
     assert psf.ndim == 3
@@ -150,7 +149,7 @@ def test_process_skips_without_petakit():
     import unittest.mock as mock
 
     plugin = DeconPlugin()
-    params = DeconParams(use_gpu=False)
+    params = DeconParams(force_cpu=True)
 
     import dask.array as da
 
@@ -171,7 +170,7 @@ def test_process_with_petakit_synthetic():
     import dask.array as da
 
     plugin = DeconPlugin()
-    params = DeconParams(iterations=2, use_gpu=False, method="rl")
+    params = DeconParams(iterations=2, force_cpu=True, method="rl")
 
     # Small synthetic 3-D stack
     rng = np.random.default_rng(0)

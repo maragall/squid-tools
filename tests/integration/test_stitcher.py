@@ -29,8 +29,8 @@ def test_stitcher_default_params():
     plugin = StitcherPlugin()
     params = plugin.default_params(None)
     assert isinstance(params, StitcherParams)
-    assert params.overlap_percent == 15.0
-    assert params.registration is True
+    assert params.registration_refinement is False
+    assert params.output_format == "OME_TIFF"
 
 
 def test_stitcher_test_cases():
@@ -69,7 +69,7 @@ def _make_2x2_tiles(tile_h: int = 64, tile_w: int = 64, overlap_px: int = 8):
 def test_grid_assembly_2x2_no_registration():
     """Grid assembly without registration produces a canvas larger than each tile."""
     plugin = StitcherPlugin()
-    params = StitcherParams(registration=False)
+    params = StitcherParams(registration_refinement=False)
 
     tiles, positions, tile_shape = _make_2x2_tiles()
     result = plugin.stitch_tiles(tiles, positions, tile_shape, params)
@@ -83,7 +83,7 @@ def test_grid_assembly_2x2_no_registration():
 def test_grid_assembly_2x2_output_values():
     """Stitched canvas contains pixel values from all input tiles."""
     plugin = StitcherPlugin()
-    params = StitcherParams(registration=False)
+    params = StitcherParams(registration_refinement=False)
 
     tiles, positions, tile_shape = _make_2x2_tiles()
     result = plugin.stitch_tiles(tiles, positions, tile_shape, params)
@@ -97,7 +97,7 @@ def test_grid_assembly_2x2_output_values():
 def test_grid_assembly_canvas_size():
     """Canvas size equals max(row) + H by max(col) + W."""
     plugin = StitcherPlugin()
-    params = StitcherParams(registration=False)
+    params = StitcherParams(registration_refinement=False)
 
     tile_h, tile_w = 64, 64
     overlap_px = 8
@@ -126,7 +126,7 @@ def test_grid_assembly_overlap_averaged():
     tile_shape = (tile_h, tile_w)
 
     plugin = StitcherPlugin()
-    params = StitcherParams(registration=False)
+    params = StitcherParams(registration_refinement=False)
     result = plugin.stitch_tiles([tile_a, tile_b], positions, tile_shape, params)
 
     # Overlap column range: stride .. tile_w
@@ -146,7 +146,7 @@ def test_stitch_from_fovs_2x2():
     from squid_tools.core.data_model import FOVPosition
 
     plugin = StitcherPlugin()
-    params = StitcherParams(registration=False)
+    params = StitcherParams(registration_refinement=False)
 
     tile_h, tile_w = 64, 64
     pixel_size_um = 1.0  # 1 µm/px for easy math
@@ -244,7 +244,7 @@ def test_validate_single_fov_warns():
 def test_stitch_tiles_with_registration_flag():
     """With registration=True and no tilefusion, falls back to grid assembly."""
     plugin = StitcherPlugin()
-    params = StitcherParams(registration=True)
+    params = StitcherParams(registration_refinement=True)
 
     tiles, positions, tile_shape = _make_2x2_tiles()
     # Should not raise even if tilefusion not installed — falls back
@@ -299,7 +299,7 @@ def test_real_data_grid_assembly():
     ]
 
     plugin = StitcherPlugin()
-    params = StitcherParams(registration=False)
+    params = StitcherParams(registration_refinement=False)
     result = plugin.stitch_tiles(tiles, positions, (tile_h, tile_w), params)
 
     assert result.shape[0] > tile_h

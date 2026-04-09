@@ -16,20 +16,16 @@ from squid_tools.plugins.base import ProcessingPlugin, TestCase
 
 
 class DeconParams(BaseModel):
-    modality: str = "widefield"
-    iterations: int = 10
-    regularization: float = 0.001
-    method: str = "omw"       # "omw" (fast) or "rl" (high resolution)
-    use_gpu: bool = True       # GPU-first; CPU fallback
-    # PSF parameters (auto-filled from OpticalMetadata when available)
+    method: str = "omw"                    # "omw" (high throughput) or "rl" (max resolution)
+    iterations: int = 2                     # 1-100, default 2 for omw, 15 for rl
+    force_cpu: bool = False                 # disable GPU
+    channel: int = 0                        # which channel to deconvolve
+    # PSF parameters (auto-filled from metadata)
     na: float = 0.8
     pixel_size_um: float = 0.65
     dz_um: float = 1.0
     emission_wavelength_um: float = 0.525
     immersion_ri: float = 1.0
-    # PSF size (0 = auto)
-    nz_psf: int = 0
-    nxy_psf: int = 0
 
 
 class DeconPlugin(ProcessingPlugin):
@@ -68,7 +64,6 @@ class DeconPlugin(ProcessingPlugin):
             ri = optical.immersion_ri
 
         return DeconParams(
-            modality=optical.modality,
             na=optical.numerical_aperture,
             pixel_size_um=optical.pixel_size_um,
             dz_um=optical.dz_um if optical.dz_um is not None else 1.0,
@@ -138,17 +133,14 @@ def _build_psf(params: DeconParams, nz: int = 1) -> np.ndarray:
     try:
         from petakit.psf import compute_psf_size, generate_psf
 
-        if params.nz_psf > 0 and params.nxy_psf > 0:
-            nz_psf, nxy_psf = params.nz_psf, params.nxy_psf
-        else:
-            nz_psf, nxy_psf = compute_psf_size(
-                nz_acquisition=max(nz, 1),
-                dxy=params.pixel_size_um,
-                dz=params.dz_um,
-                wavelength=params.emission_wavelength_um,
-                na=params.na,
-                ni=params.immersion_ri,
-            )
+        nz_psf, nxy_psf = compute_psf_size(
+            nz_acquisition=max(nz, 1),
+            dxy=params.pixel_size_um,
+            dz=params.dz_um,
+            wavelength=params.emission_wavelength_um,
+            na=params.na,
+            ni=params.immersion_ri,
+        )
 
         return generate_psf(
             nz=nz_psf,
@@ -220,7 +212,7 @@ def _deconvolve_block(
             psf,
             method=params.method,
             iterations=params.iterations,
-            gpu=params.use_gpu,
+            gpu=not params.force_cpu,
         )
 
         if squeeze:

@@ -118,6 +118,10 @@ def _build_tile_layers(
     # Probe shape / dtype from the first tile
     tile_shape, tile_dtype = _probe_tile_shape_dtype(acq, region_id)
 
+    # Subtract minimum coordinates so tiles start near (0, 0)
+    min_x = min(fov.x_mm for fov in region.fovs)
+    min_y = min(fov.y_mm for fov in region.fovs)
+
     tiles: list[TileDescriptor] = []
     for fov in region.fovs:
         # Build a dask delayed read
@@ -130,10 +134,10 @@ def _build_tile_layers(
             dtype=tile_dtype,
         )
 
-        # Convert mm -> um -> pixels for the translate offset
+        # Convert mm -> um -> pixels for the translate offset (relative)
         # napari uses (row, col) = (y, x)
-        row_px = fov.y_mm * 1000.0 / pixel_size_um
-        col_px = fov.x_mm * 1000.0 / pixel_size_um
+        row_px = (fov.y_mm - min_y) * 1000.0 / pixel_size_um
+        col_px = (fov.x_mm - min_x) * 1000.0 / pixel_size_um
 
         tiles.append(
             TileDescriptor(
