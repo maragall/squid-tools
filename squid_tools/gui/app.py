@@ -15,16 +15,20 @@ from PyQt5.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
+from squid_tools.core.data_model import Acquisition
 from squid_tools.core.readers import open_acquisition
 from squid_tools.core.registry import discover_plugins
 from squid_tools.gui.controls import ControlsPanel
 from squid_tools.gui.log_panel import LogPanel
+from squid_tools.gui.mosaic import MosaicWidget
 from squid_tools.gui.processing_tabs import ProcessingTabs
 from squid_tools.gui.theme import STYLESHEET
+from squid_tools.gui.viewer import SingleFOVWidget
 from squid_tools.gui.wellplate import RegionSelector
 
 _LOGO_PATH = Path(__file__).parent / "cephla_logo.svg"
@@ -85,6 +89,12 @@ class MainWindow(QMainWindow):
         self._controls = ControlsPanel()
         middle.addWidget(self._controls)
 
+        # ---- Viewer stack (placeholder / single-FOV / mosaic) ----
+        self._viewer_stack = QStackedWidget()
+        self._IDX_PLACEHOLDER = 0
+        self._IDX_FOV = 1
+        self._IDX_MOSAIC = 2
+
         self._viewer_placeholder = QLabel("Open an acquisition to begin")
         self._viewer_placeholder.setToolTip(
             "Image viewer: open an acquisition via File > Open Acquisition"
@@ -94,7 +104,13 @@ class MainWindow(QMainWindow):
             "border: 1px solid #555; font-size: 14pt; }"
         )
         self._viewer_placeholder.setAlignment(Qt.AlignCenter)
-        middle.addWidget(self._viewer_placeholder, stretch=1)
+        self._viewer_stack.insertWidget(self._IDX_PLACEHOLDER, self._viewer_placeholder)
+
+        # Napari viewers are created lazily on first acquisition load
+        self._fov_widget: SingleFOVWidget | None = None
+        self._mosaic_widget: MosaicWidget | None = None
+
+        middle.addWidget(self._viewer_stack, stretch=1)
 
         self._region_selector = RegionSelector()
         middle.addWidget(self._region_selector)
@@ -110,6 +126,11 @@ class MainWindow(QMainWindow):
 
         # ---- Load plugins ----
         self._load_plugins()
+
+        # ---- State ----
+        self._acq: Acquisition | None = None
+        self._current_region: str | None = None
+        self._view_mode: str = "fov"  # "fov" or "mosaic"
 
         # ---- Connect signals ----
         self._controls.view_mode_changed.connect(self._on_view_mode_changed)
@@ -155,6 +176,47 @@ class MainWindow(QMainWindow):
     # Slots
     # ------------------------------------------------------------------
 
+    def _ensure_viewers(self) -> None:
+        """Lazily create napari viewer widgets on first use."""
+        if self._fov_widget is None:
+            self._fov_widget = SingleFOVWidget()
+            self._viewer_stack.insertWidget(self._IDX_FOV, self._fov_widget.widget)
+        if self._mosaic_widget is None:
+            self._mosaic_widget = MosaicWidget()
+            self._viewer_stack.insertWidget(self._IDX_MOSAIC, self._mosaic_widget.widget)
+
+    def _show_current_view(self) -> None:
+        """Switch the stacked widget to the active view mode."""
+        if self._acq is None:
+            self._viewer_stack.setCurrentIndex(self._IDX_PLACEHOLDER)
+            return
+        if self._view_mode == "mosaic":
+            self._viewer_stack.setCurrentIndex(self._IDX_MOSAIC)
+        else:
+            self._viewer_stack.setCurrentIndex(self._IDX_FOV)
+
+    def _load_region(self, region_id: str) -> None:
+        """Load the given region into both viewers."""
+        if self._acq is None:
+            return
+
+        self._current_region = region_id
+        self._ensure_viewers()
+
+        try:
+            assert self._fov_widget is not None
+            self._fov_widget.set_acquisition(self._acq, region_id, fov_index=0)
+        except Exception as exc:  # noqa: BLE001
+            self._log_panel.set_status(f"Error loading FOV viewer: {exc}")
+
+        try:
+            assert self._mosaic_widget is not None
+            self._mosaic_widget.set_acquisition(self._acq, region_id, channel=0)
+        except Exception as exc:  # noqa: BLE001
+            self._log_panel.set_status(f"Error loading mosaic viewer: {exc}")
+
+        self._show_current_view()
+
     def _on_open_acquisition(self) -> None:
         path = QFileDialog.getExistingDirectory(
             self,
@@ -167,7 +229,13 @@ class MainWindow(QMainWindow):
         self._log_panel.set_status(f"Opening acquisition: {path} …")
         try:
             acq = open_acquisition(path)
+            self._acq = acq
             self._region_selector.set_acquisition(acq)
+
+            # Auto-select the first region
+            first_region = next(iter(acq.regions))
+            self._load_region(first_region)
+
             self._log_panel.set_status(
                 f"Loaded acquisition: {path}  ({len(acq.regions)} region(s))"
             )
@@ -175,13 +243,18 @@ class MainWindow(QMainWindow):
             self._log_panel.set_status(f"Error opening acquisition: {exc}")
 
     def _on_view_mode_changed(self, mode: str) -> None:
+        self._view_mode = mode
+        self._show_current_view()
         self._log_panel.set_status(f"View mode: {mode}")
 
     def _on_borders_toggled(self, enabled: bool) -> None:
+        if self._mosaic_widget is not None:
+            self._mosaic_widget.show_borders(enabled)
         state = "on" if enabled else "off"
         self._log_panel.set_status(f"FOV borders: {state}")
 
     def _on_region_selected(self, region_id: str) -> None:
+        self._load_region(region_id)
         self._log_panel.set_status(f"Selected region: {region_id}")
 
     def _on_run_requested(self, plugin_name: str, params: object) -> None:
