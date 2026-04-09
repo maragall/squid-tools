@@ -7,7 +7,7 @@ with install instructions is raised at call time.
 
 from __future__ import annotations
 
-from typing import List, Optional, Sequence
+from collections.abc import Sequence
 
 import dask.array as da
 import numpy as np
@@ -108,7 +108,7 @@ class StitcherPlugin(ProcessingPlugin):
         tiles: Sequence[np.ndarray],
         fovs: Sequence[FOVPosition],
         pixel_size_um: float,
-        params: Optional[StitcherParams] = None,
+        params: StitcherParams | None = None,
     ) -> np.ndarray:
         """Convenience wrapper: convert FOV stage coords to pixel offsets then stitch.
 
@@ -135,7 +135,7 @@ class StitcherPlugin(ProcessingPlugin):
         col_px = ((xs - xs.min()) / pixel_size_um).astype(int)
         row_px = ((ys - ys.min()) / pixel_size_um).astype(int)
 
-        positions = list(zip(row_px.tolist(), col_px.tolist()))
+        positions = list(zip(row_px.tolist(), col_px.tolist(), strict=True))
         return self.stitch_tiles(tiles, positions, (tile_h, tile_w), params)
 
     def test_cases(self) -> list[TestCase]:
@@ -170,7 +170,7 @@ def _grid_assemble(
     canvas = np.zeros((canvas_h, canvas_w), dtype=np.float64)
     weight = np.zeros((canvas_h, canvas_w), dtype=np.float64)
 
-    for tile, (r, c) in zip(tiles, positions_px):
+    for tile, (r, c) in zip(tiles, positions_px, strict=True):
         t = np.asarray(tile, dtype=np.float64)
         if t.ndim > 2:
             t = t.reshape(tile_h, tile_w)

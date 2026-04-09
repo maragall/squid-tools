@@ -7,7 +7,6 @@ import pytest
 
 from squid_tools.plugins.stitcher import StitcherParams, StitcherPlugin
 
-
 # ---------------------------------------------------------------------------
 # Plugin attribute tests
 # ---------------------------------------------------------------------------
@@ -177,6 +176,8 @@ def test_stitch_from_fovs_2x2():
 
 def test_validate_single_fov_warns():
     """validate() should warn when only 1 FOV is present."""
+    from pathlib import Path
+
     from squid_tools.core.data_model import (
         Acquisition,
         AcquisitionChannel,
@@ -189,7 +190,6 @@ def test_validate_single_fov_warns():
         Region,
         ScanConfig,
     )
-    from pathlib import Path
 
     objective = ObjectiveMetadata(
         name="10x",
