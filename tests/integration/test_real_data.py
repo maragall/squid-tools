@@ -60,7 +60,7 @@ def test_read_frame_real():
     from squid_tools.core.readers.detect import open_acquisition
     from squid_tools.core.readers.individual import IndividualImageReader
 
-    acq = open_acquisition(REAL_DATA)
+    open_acquisition(REAL_DATA)  # validates metadata parses correctly
     reader = IndividualImageReader()
     # Read first FOV, first channel
     key = FrameKey(region="manual", fov=0, z=0, channel=0, timepoint=0)

@@ -122,7 +122,9 @@ def _open_acquisition_from_params_json(path: Path) -> Acquisition:
     # ------------------------------------------------------------------
     obj_raw: dict[str, Any] = hw_params.get("objective", {})
     tube_lens_mm: float = float(hw_params.get("tube_lens_mm", 180.0))
-    sensor_pixel_size_um: float = float(hw_params.get("sensor_pixel_size_um", obj_raw.get("sensor_pixel_size_um", 1.85)))
+    sensor_pixel_size_um: float = float(
+        hw_params.get("sensor_pixel_size_um", obj_raw.get("sensor_pixel_size_um", 1.85))
+    )
 
     objective = ObjectiveMetadata(
         name=str(obj_raw.get("name", "")),
@@ -203,7 +205,8 @@ def _open_acquisition_from_params_json(path: Path) -> Acquisition:
 
                 x_mm = float(row["x (mm)"])
                 y_mm = float(row["y (mm)"])
-                z_um_val = float(row["z (um)"]) if "z (um)" in row and row["z (um)"].strip() else 0.0
+                has_z = "z (um)" in row and row["z (um)"].strip()
+                z_um_val = float(row["z (um)"]) if has_z else 0.0
 
                 fov_pos = FOVPosition(
                     fov_index=fov_idx,
@@ -217,7 +220,7 @@ def _open_acquisition_from_params_json(path: Path) -> Acquisition:
                 )
 
         # Infer grid shape from unique x/y positions
-        for rid, fovs in region_fovs.items():
+        for _rid, fovs in region_fovs.items():
             unique_x = len({round(f.x_mm, 6) for f in fovs})
             unique_y = len({round(f.y_mm, 6) for f in fovs})
             if unique_x > 1:

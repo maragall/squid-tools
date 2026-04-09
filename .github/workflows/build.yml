@@ -1,0 +1,57 @@
+name: Build
+
+on:
+  push:
+    branches: [main, feat/*]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -e ".[dev]"
+      - run: pip install sep
+      - run: ruff check squid_tools/ tests/
+      - run: ruff format --check squid_tools/ tests/
+      - run: pytest tests/ -v --tb=short
+
+  build-windows:
+    runs-on: windows-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e ".[gui,dev]"
+      - run: pip install pyinstaller sep
+      - run: cd installer && pyinstaller squid_tools.spec
+      - uses: actions/upload-artifact@v4
+        with:
+          name: squid-tools-windows
+          path: installer/dist/squid-tools/
+
+  build-linux:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: sudo apt-get update && sudo apt-get install -y libxcb-xinerama0
+      - run: pip install -e ".[gui,dev]"
+      - run: pip install pyinstaller sep
+      - run: cd installer && pyinstaller squid_tools.spec
+      - uses: actions/upload-artifact@v4
+        with:
+          name: squid-tools-linux
+          path: installer/dist/squid-tools/

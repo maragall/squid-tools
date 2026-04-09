@@ -26,8 +26,7 @@ def _detect_naming_convention(timepoint_dir: Path) -> str:
     ``"legacy"`` for ``{region}_{fov:05d}_C{ch:02d}.tiff`` (with optional z)
     """
     for f in timepoint_dir.iterdir():
-        if f.suffix.lower() in (".tiff", ".tif"):
-            if _SQUID_REAL_RE.match(f.name):
+        if f.suffix.lower() in (".tiff", ".tif") and _SQUID_REAL_RE.match(f.name):
                 return "squid_real"
     return "legacy"
 
