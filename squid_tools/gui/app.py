@@ -3,11 +3,7 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QIcon
-from PyQt5.QtSvg import QSvgWidget
 from PyQt5.QtWidgets import (
     QAction,
     QApplication,
@@ -15,6 +11,7 @@ from PyQt5.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -24,10 +21,8 @@ from squid_tools.core.registry import discover_plugins
 from squid_tools.gui.controls import ControlsPanel
 from squid_tools.gui.log_panel import LogPanel
 from squid_tools.gui.processing_tabs import ProcessingTabs
-from squid_tools.gui.theme import STYLESHEET
+from squid_tools.gui.viewer import SingleFOVViewer
 from squid_tools.gui.wellplate import RegionSelector
-
-_LOGO_PATH = Path(__file__).parent / "cephla_logo.svg"
 
 
 class MainWindow(QMainWindow):
@@ -51,8 +46,6 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Squid-Tools")
         self.setMinimumSize(self._MIN_WIDTH, self._MIN_HEIGHT)
-        if _LOGO_PATH.exists():
-            self.setWindowIcon(QIcon(str(_LOGO_PATH)))
 
         # ---- Central widget & root layout ----
         central = QWidget()
@@ -60,19 +53,6 @@ class MainWindow(QMainWindow):
         root_layout = QVBoxLayout(central)
         root_layout.setContentsMargins(4, 4, 4, 4)
         root_layout.setSpacing(4)
-
-        # ---- Header with logo ----
-        header = QHBoxLayout()
-        header.setSpacing(8)
-        if _LOGO_PATH.exists():
-            logo = QSvgWidget(str(_LOGO_PATH))
-            logo.setFixedSize(32, 32)
-            header.addWidget(logo)
-        title_label = QLabel("Squid-Tools")
-        title_label.setStyleSheet("font-size: 14pt; font-weight: bold; color: #ffffff;")
-        header.addWidget(title_label)
-        header.addStretch()
-        root_layout.addLayout(header)
 
         # ---- Processing tabs (top) ----
         self._processing_tabs = ProcessingTabs()
@@ -85,16 +65,23 @@ class MainWindow(QMainWindow):
         self._controls = ControlsPanel()
         middle.addWidget(self._controls)
 
-        self._viewer_placeholder = QLabel("Open an acquisition to begin")
-        self._viewer_placeholder.setToolTip(
-            "Image viewer: open an acquisition via File > Open Acquisition"
+        # Page 0: single FOV viewer; Page 1: mosaic placeholder
+        self._viewer_stack = QStackedWidget()
+
+        self._fov_viewer = SingleFOVViewer()
+        self._viewer_stack.addWidget(self._fov_viewer)  # index 0
+
+        self._mosaic_placeholder = QLabel("Mosaic view (coming soon)")
+        self._mosaic_placeholder.setAlignment(
+            __import__("PyQt5.QtCore", fromlist=["Qt"]).Qt.AlignCenter
         )
-        self._viewer_placeholder.setStyleSheet(
-            "QLabel { background-color: #1e1e1e; color: #666;"
-            "border: 1px solid #555; font-size: 14pt; }"
+        self._mosaic_placeholder.setStyleSheet(
+            "QLabel { background-color: #1a1a1a; color: #888888;"
+            "border: 1px solid #444; font-size: 14pt; }"
         )
-        self._viewer_placeholder.setAlignment(Qt.AlignCenter)
-        middle.addWidget(self._viewer_placeholder, stretch=1)
+        self._viewer_stack.addWidget(self._mosaic_placeholder)  # index 1
+
+        middle.addWidget(self._viewer_stack, stretch=1)
 
         self._region_selector = RegionSelector()
         middle.addWidget(self._region_selector)
@@ -175,6 +162,7 @@ class MainWindow(QMainWindow):
             self._log_panel.set_status(f"Error opening acquisition: {exc}")
 
     def _on_view_mode_changed(self, mode: str) -> None:
+        self._viewer_stack.setCurrentIndex(0 if mode == "fov" else 1)
         self._log_panel.set_status(f"View mode: {mode}")
 
     def _on_borders_toggled(self, enabled: bool) -> None:
@@ -192,7 +180,6 @@ def main() -> None:
     """Entry point for the Squid-Tools GUI."""
     app = QApplication(sys.argv)
     app.setApplicationName("Squid-Tools")
-    app.setStyleSheet(STYLESHEET)
     window = MainWindow()
     window.show()
     sys.exit(app.exec_())
