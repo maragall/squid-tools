@@ -15,20 +15,13 @@ import dask
 import dask.array as da
 import numpy as np
 
-from squid_tools.core.cache import MemoryBoundedLRUCache
 from squid_tools.core.data_model import (
     Acquisition,
     AcquisitionFormat,
     FrameKey,
 )
-from squid_tools.core.handle_pool import TiffHandlePool
 from squid_tools.core.readers.individual import IndividualImageReader
 from squid_tools.core.readers.ome_tiff import OMETiffReader
-
-# Shared infrastructure: memory-bounded cache and handle pool
-# (same patterns as ndviewer_light's production data loading)
-_tile_cache = MemoryBoundedLRUCache(max_memory_bytes=512 * 1024 * 1024)  # 512 MB
-_handle_pool = TiffHandlePool(max_handles=128)
 
 if TYPE_CHECKING:
     from PyQt5.QtWidgets import QWidget
@@ -63,16 +56,7 @@ def _read_frame_for_acq(
     z: int = 0,
     timepoint: int = 0,
 ) -> np.ndarray:
-    """Read a single frame with memory-bounded caching.
-
-    Uses the same cache/pool infrastructure as ndviewer_light for
-    data-intensive, memory-safe tile loading.
-    """
-    cache_key = f"{acq.path}:{region_id}:{fov_index}:{z}:{channel}:{timepoint}"
-    cached = _tile_cache.get(cache_key)
-    if cached is not None:
-        return cached
-
+    """Read a single frame using the appropriate reader for *acq*."""
     key = FrameKey(
         region=region_id,
         fov=fov_index,
@@ -84,9 +68,7 @@ def _read_frame_for_acq(
         reader = OMETiffReader()
     else:
         reader = IndividualImageReader()
-    frame = reader.read_frame(acq.path, key)
-    _tile_cache.put(cache_key, frame)
-    return frame
+    return reader.read_frame(acq.path, key)
 
 
 def _probe_tile_shape_dtype(
