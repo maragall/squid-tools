@@ -1,0 +1,54 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "squid-tools"
+version = "0.1.0"
+description = "Post-processing connector for Cephla-Lab/Squid microscopy"
+requires-python = ">=3.10"
+dependencies = [
+    "pydantic>=2.10",
+    "numpy>=1.24",
+    "dask[array]>=2024.1",
+    "tifffile>=2024.1",
+    "pyyaml>=6.0",
+    "zarr>=2.16",
+    "PySide6>=6.6",
+    "vispy>=0.14",
+    "scipy>=1.10",
+    "numba>=0.59",
+    "scikit-image>=0.22",
+]
+
+[project.optional-dependencies]
+gpu = ["cupy-cuda12x>=13.0"]
+dev = [
+    "pytest>=8.0",
+    "pytest-qt>=4.2",
+    "ruff>=0.4",
+    "mypy>=1.10",
+]
+
+[project.entry-points."squid_tools.plugins"]
+flatfield = "squid_tools.processing.flatfield.plugin:FlatfieldPlugin"
+stitcher = "squid_tools.processing.stitching.plugin:StitcherPlugin"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+qt_api = "pyside6"
+markers = [
+    "gpu: requires CUDA GPU",
+]

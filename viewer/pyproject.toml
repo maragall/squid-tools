@@ -1,0 +1,14 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "squid-tools-viewer"
+version = "0.1.0"
+description = "Custom vispy+PySide6 viewer for squid-tools"
+requires-python = ">=3.10"
+dependencies = [
+    "squid-tools-core>=0.1.0",
+    "vispy>=0.14",
+    "PySide6>=6.6",
+]

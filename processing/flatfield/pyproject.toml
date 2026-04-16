@@ -1,0 +1,16 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "squid-tools-flatfield"
+version = "0.1.0"
+description = "Flatfield correction processing module for squid-tools"
+requires-python = ">=3.10"
+dependencies = [
+    "squid-tools-core>=0.1.0",
+    "scipy>=1.10",
+]
+
+[project.entry-points."squid_tools.plugins"]
+flatfield = "squid_tools.processing.flatfield.plugin:FlatfieldPlugin"

@@ -1,0 +1,4 @@
+- [Julio Profile](user_julio_profile.md) — builds open-source post-processing suite for Cephla-Lab Squid, drug discovery market
+- [Squid-Tools Context](project_squid_tools_context.md) — architecture decisions, module list, format standardization, connector philosophy
+- [Superpowers Discipline](feedback_superpowers_discipline.md) — ALWAYS invoke superpowers skills (worktrees, TDD, code review) on every prompt, re-read each time
+- [Life Sciences UX](feedback_user_experience.md) — zero training GUI, tooltips everywhere, no jargon, web download page for bundles
