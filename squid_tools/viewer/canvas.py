@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import numpy as np
 import vispy.app
+from PySide6.QtCore import QObject, Signal
 from vispy.scene import SceneCanvas
 from vispy.scene.cameras import PanZoomCamera
 from vispy.scene.visuals import Image, Line
@@ -27,10 +28,13 @@ def _to_float32(data: np.ndarray) -> np.ndarray:
     return data.astype(np.float32)
 
 
-class StageCanvas:
+class StageCanvas(QObject):
     """Renders tiles in mm stage coordinates."""
 
+    selection_drawn = Signal(tuple)  # (x_min_mm, y_min_mm, x_max_mm, y_max_mm)
+
     def __init__(self) -> None:
+        super().__init__()
         self._canvas = SceneCanvas(keys="interactive", show=False, bgcolor="#000000")
         self._view = self._canvas.central_widget.add_view()
         self._view.camera = PanZoomCamera(aspect=1)
@@ -40,6 +44,18 @@ class StageCanvas:
         self._borders_visible = True
         self._clim: tuple[float, float] | None = None
         self._cmap: str = "grays"
+
+        # Selection state (canvas just tracks IDs; ViewerWidget owns real state)
+        self._selected_ids: set[int] = set()
+
+        # Drag-box state
+        self._drag_start: tuple[float, float] | None = None
+        self._drag_rect: Line | None = None
+
+        # Wire mouse events
+        self._canvas.events.mouse_press.connect(self._on_mouse_press)
+        self._canvas.events.mouse_move.connect(self._on_mouse_move)
+        self._canvas.events.mouse_release.connect(self._on_mouse_release)
 
     def set_clim(self, clim: tuple[float, float]) -> None:
         self._clim = clim
@@ -106,17 +122,83 @@ class StageCanvas:
             [tile.x_mm, tile.y_mm],
         ], dtype=np.float32)
 
+        color = self._border_color_for(tile.fov_index, self._selected_ids)
         if tile.fov_index in self._borders:
-            self._borders[tile.fov_index].set_data(pos=corners)
+            self._borders[tile.fov_index].set_data(pos=corners, color=color)
         else:
             line = Line(
-                pos=corners, color="yellow", width=2,
+                pos=corners, color=color, width=2,
                 connect="strip", parent=self._view.scene,
             )
             line.order = -1
             self._borders[tile.fov_index] = line
 
         self._borders[tile.fov_index].visible = self._borders_visible
+
+    def set_selected_ids(self, ids: set[int]) -> None:
+        """Update which FOVs should be drawn with selection borders."""
+        self._selected_ids = set(ids)
+        # Re-color existing borders
+        for fov_id, line in self._borders.items():
+            color = self._border_color_for(fov_id, self._selected_ids)
+            line.set_data(color=color)
+
+    @staticmethod
+    def _border_color_for(fov_index: int, selected_ids: set[int]) -> str:
+        """Return the border color string for a given FOV."""
+        return "#2A82DA" if fov_index in selected_ids else "yellow"
+
+    def _scene_coords(self, event_pos: tuple[float, float]) -> tuple[float, float]:
+        """Convert pixel event coords to scene (mm) coords."""
+        tr = self._canvas.scene.node_transform(self._view.scene)
+        mapped = tr.map(event_pos)
+        return float(mapped[0]), float(mapped[1])
+
+    def _on_mouse_press(self, event: object) -> None:
+        modifiers = getattr(event, "modifiers", ())
+        from vispy.util.keys import SHIFT
+        if SHIFT in modifiers:
+            self._drag_start = self._scene_coords(event.pos)
+            # Disable camera interaction while drag-selecting
+            self._view.camera.interactive = False
+
+    def _on_mouse_move(self, event: object) -> None:
+        if self._drag_start is None:
+            return
+        x0, y0 = self._drag_start
+        x1, y1 = self._scene_coords(event.pos)
+        self._update_drag_rect(x0, y0, x1, y1)
+
+    def _on_mouse_release(self, event: object) -> None:
+        if self._drag_start is None:
+            return
+        x0, y0 = self._drag_start
+        x1, y1 = self._scene_coords(event.pos)
+        x_min, x_max = min(x0, x1), max(x0, x1)
+        y_min, y_max = min(y0, y1), max(y0, y1)
+        # Remove the drag rectangle visual
+        if self._drag_rect is not None:
+            self._drag_rect.parent = None
+            self._drag_rect = None
+        self._drag_start = None
+        self._view.camera.interactive = True
+        # Emit selection bounds
+        self.selection_drawn.emit((x_min, y_min, x_max, y_max))
+
+    def _update_drag_rect(
+        self, x0: float, y0: float, x1: float, y1: float,
+    ) -> None:
+        corners = np.array([
+            [x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0],
+        ], dtype=np.float32)
+        if self._drag_rect is None:
+            self._drag_rect = Line(
+                pos=corners, color="#2A82DA", width=1,
+                connect="strip", parent=self._view.scene,
+            )
+            self._drag_rect.order = -2
+        else:
+            self._drag_rect.set_data(pos=corners)
 
     def set_borders_visible(self, visible: bool) -> None:
         self._borders_visible = visible
