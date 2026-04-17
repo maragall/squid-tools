@@ -127,3 +127,48 @@ class TestViewportEngine:
         p1, p99 = engine.compute_contrast(channel=0, fov_indices=[])
         assert p1 == 0.0
         assert p99 == 65535.0
+
+
+class TestViewportEngineHelpers:
+    def test_all_fov_indices(self, tmp_path):
+        from pathlib import Path
+        from squid_tools.viewer.viewport_engine import ViewportEngine
+        from tests.fixtures.generate_fixtures import create_individual_acquisition
+
+        acq_path = create_individual_acquisition(
+            tmp_path / "acq", nx=2, ny=2, nz=1, nc=1, nt=1,
+        )
+        engine = ViewportEngine()
+        engine.load(acq_path, region="0")
+        indices = engine.all_fov_indices()
+        assert indices == {0, 1, 2, 3}
+
+    def test_visible_fov_indices_uses_camera(self, tmp_path):
+        from pathlib import Path
+        from squid_tools.viewer.viewport_engine import ViewportEngine
+        from tests.fixtures.generate_fixtures import create_individual_acquisition
+
+        acq_path = create_individual_acquisition(
+            tmp_path / "acq", nx=2, ny=2, nz=1, nc=1, nt=1,
+        )
+        engine = ViewportEngine()
+        engine.load(acq_path, region="0")
+        # Entire bounding box → all 4 FOVs
+        bb = engine.bounding_box()
+        visible = engine.visible_fov_indices(*bb)
+        assert visible == {0, 1, 2, 3}
+
+    def test_get_nominal_positions(self, tmp_path):
+        from pathlib import Path
+        from squid_tools.viewer.viewport_engine import ViewportEngine
+        from tests.fixtures.generate_fixtures import create_individual_acquisition
+
+        acq_path = create_individual_acquisition(
+            tmp_path / "acq", nx=2, ny=2, nz=1, nc=1, nt=1,
+        )
+        engine = ViewportEngine()
+        engine.load(acq_path, region="0")
+        positions = engine.get_nominal_positions({0, 1})
+        assert 0 in positions and 1 in positions
+        assert isinstance(positions[0], tuple)
+        assert len(positions[0]) == 2

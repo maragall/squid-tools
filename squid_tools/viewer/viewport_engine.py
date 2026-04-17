@@ -382,6 +382,49 @@ class ViewportEngine:
 
         return tiles
 
+    def all_fov_indices(self) -> set[int]:
+        """All FOV indices in the currently loaded region."""
+        if self._acquisition is None or self._region == "":
+            return set()
+        region_obj = self._acquisition.regions.get(self._region)
+        if region_obj is None:
+            return set()
+        return {fov.fov_index for fov in region_obj.fovs}
+
+    def visible_fov_indices(
+        self, x_min: float, y_min: float, x_max: float, y_max: float,
+    ) -> set[int]:
+        """FOV indices whose tiles intersect the given viewport (mm)."""
+        if self._index is None:
+            return set()
+        visible = self._index.query(x_min, y_min, x_max, y_max)
+        return {fov.fov_index for fov in visible}
+
+    def get_nominal_positions(
+        self, indices: set[int],
+    ) -> dict[int, tuple[float, float]]:
+        """Return {fov_index: (x_mm, y_mm)} for the given indices.
+
+        Returns nominal positions from coordinates.csv, ignoring any
+        position overrides from registration.
+        """
+        if self._acquisition is None or self._region == "":
+            return {}
+        region_obj = self._acquisition.regions.get(self._region)
+        if region_obj is None:
+            return {}
+        return {
+            fov.fov_index: (fov.x_mm, fov.y_mm)
+            for fov in region_obj.fovs
+            if fov.fov_index in indices
+        }
+
+    def get_raw_frame(
+        self, fov_index: int, z: int = 0, channel: int = 0, timepoint: int = 0,
+    ) -> np.ndarray:
+        """Get the raw (unprocessed) frame for a specific FOV."""
+        return self._load_raw(fov_index, z, channel, timepoint)
+
     def _load_raw(self, fov: int, z: int, channel: int, timepoint: int) -> np.ndarray:
         """Load raw frame with caching."""
         cache_key = f"raw_{self._region}_{fov}_{z}_{channel}_{timepoint}"
