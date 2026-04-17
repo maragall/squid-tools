@@ -209,6 +209,94 @@ class StitcherPlugin(ProcessingPlugin):
         normalize_shard(fused, weight)
         return fused[0]  # return 2D
 
+    def run_live(self, selection, engine, params, progress):
+        """Progressive pairwise registration with live position updates."""
+        from squid_tools.processing.stitching.registration import (
+            find_adjacent_pairs,
+            register_pair_worker,
+        )
+        from squid_tools.processing.stitching.optimization import (
+            links_from_pairwise_metrics,
+            two_round_optimization,
+        )
+
+        # Phase 1: Find pairs
+        progress("Finding pairs", 0, 1)
+        indices = selection if selection else engine.all_fov_indices()
+        if len(indices) < 2:
+            progress("Finding pairs", 1, 1)
+            return
+
+        nominal = engine.get_nominal_positions(indices)
+        pixel_size = engine.pixel_size_um
+        sorted_ids = sorted(nominal.keys())
+        positions_px = [
+            (nominal[i][1] * 1000.0 / pixel_size, nominal[i][0] * 1000.0 / pixel_size)
+            for i in sorted_ids
+        ]
+        # Pick any loaded frame to determine tile shape
+        sample_frame = engine.get_raw_frame(sorted_ids[0], z=0, channel=0, timepoint=0)
+        tile_shape = sample_frame.shape[:2]
+        pairs = find_adjacent_pairs(
+            positions_px, (1.0, 1.0), tile_shape, min_overlap=15,
+        )
+        progress("Finding pairs", 1, 1)
+        if not pairs:
+            return
+
+        # Phase 2: Register progressively
+        total = len(pairs)
+        pairwise_metrics: dict[tuple[int, int], tuple[int, int, float]] = {}
+
+        for k, (i_pos, j_pos, _dy, _dx, _ov_y, _ov_x) in enumerate(pairs):
+            progress("Registering", k, total)
+            frame_i = engine.get_raw_frame(
+                sorted_ids[i_pos], z=0, channel=0, timepoint=0,
+            ).astype("float32")
+            frame_j = engine.get_raw_frame(
+                sorted_ids[j_pos], z=0, channel=0, timepoint=0,
+            ).astype("float32")
+            df = (params.downsample_factor, params.downsample_factor)
+            result = register_pair_worker((
+                i_pos, j_pos, frame_i, frame_j, df,
+                params.ssim_window, params.ssim_threshold,
+                (params.max_shift_pixels, params.max_shift_pixels),
+            ))
+            _, _, dy_s, dx_s, score = result
+            if dy_s is not None:
+                nom_dy = positions_px[j_pos][0] - positions_px[i_pos][0]
+                nom_dx = positions_px[j_pos][1] - positions_px[i_pos][1]
+                pairwise_metrics[(i_pos, j_pos)] = (
+                    int(nom_dy + dy_s), int(nom_dx + dx_s), score,
+                )
+        progress("Registering", total, total)
+
+        if not pairwise_metrics:
+            return
+
+        # Phase 3: Optimize & publish positions
+        progress("Optimizing", 0, 1)
+        links = links_from_pairwise_metrics(pairwise_metrics)
+        try:
+            shifts = two_round_optimization(
+                links,
+                n_tiles=len(sorted_ids),
+                fixed_indices=[0],
+                rel_thresh=3.0, abs_thresh=50.0, iterative=False,
+            )
+        except np.linalg.LinAlgError:
+            progress("Optimizing", 1, 1)
+            return
+        overrides: dict[int, tuple[float, float]] = {}
+        for i, idx in enumerate(sorted_ids):
+            ox, oy = nominal[idx]
+            overrides[idx] = (
+                ox + float(shifts[i, 1]) * pixel_size / 1000.0,
+                oy + float(shifts[i, 0]) * pixel_size / 1000.0,
+            )
+        engine.set_position_overrides(overrides)
+        progress("Optimizing", 1, 1)
+
     def default_params(self, optical: OpticalMetadata | None = None) -> BaseModel:
         px = optical.pixel_size_um if optical and optical.pixel_size_um else 0.325
         return StitcherParams(pixel_size_um=px)
