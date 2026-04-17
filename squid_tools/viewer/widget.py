@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from squid_tools.viewer.canvas import StageCanvas
+from squid_tools.viewer.selection import SelectionState
 from squid_tools.viewer.viewport_engine import ViewportEngine
 
 
@@ -34,6 +35,10 @@ class ViewerWidget(QWidget):
         self._engine = ViewportEngine()
         self._region: str = ""
         self._channels: list[str] = []
+
+        self.selection = SelectionState(self)
+        self._canvas.selection_drawn.connect(self._on_selection_drawn)
+        self.selection.selection_changed.connect(self._on_selection_changed)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -216,6 +221,24 @@ class ViewerWidget(QWidget):
             timepoint=self.t_slider.value(),
         )
         self._canvas.render_tiles(tiles)
+
+    def _on_selection_drawn(
+        self, rect: tuple[float, float, float, float],
+    ) -> None:
+        """Shift+drag released. Convert mm rectangle to FOV indices."""
+        if not self._engine.is_loaded():
+            return
+        x_min, y_min, x_max, y_max = rect
+        # Tiny rectangles = clear selection
+        if abs(x_max - x_min) < 1e-6 or abs(y_max - y_min) < 1e-6:
+            self.selection.clear()
+            return
+        visible = self._engine.visible_fov_indices(x_min, y_min, x_max, y_max)
+        self.selection.set_selection(visible)
+
+    def _on_selection_changed(self, selected: set) -> None:
+        """Selection changed. Update canvas border colors."""
+        self._canvas.set_selected_ids(selected)
 
     def contextMenuEvent(self, event: object) -> None:  # type: ignore[override]  # noqa: N802
         menu = QMenu(self)
