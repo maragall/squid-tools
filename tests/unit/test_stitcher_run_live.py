@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from squid_tools.processing.stitching.plugin import StitcherPlugin, StitcherParams
+from squid_tools.processing.stitching.plugin import StitcherParams, StitcherPlugin
 from squid_tools.viewer.viewport_engine import ViewportEngine
 from tests.fixtures.generate_fixtures import create_individual_acquisition
 

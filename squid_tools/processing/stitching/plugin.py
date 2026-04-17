@@ -211,13 +211,13 @@ class StitcherPlugin(ProcessingPlugin):
 
     def run_live(self, selection, engine, params, progress):
         """Progressive pairwise registration with live position updates."""
-        from squid_tools.processing.stitching.registration import (
-            find_adjacent_pairs,
-            register_pair_worker,
-        )
         from squid_tools.processing.stitching.optimization import (
             links_from_pairwise_metrics,
             two_round_optimization,
+        )
+        from squid_tools.processing.stitching.registration import (
+            find_adjacent_pairs,
+            register_pair_worker,
         )
 
         # Phase 1: Find pairs

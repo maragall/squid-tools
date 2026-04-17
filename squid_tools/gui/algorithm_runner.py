@@ -9,8 +9,8 @@ from __future__ import annotations
 import traceback
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QObject, QThread, Signal
 from pydantic import BaseModel
+from PySide6.QtCore import QObject, QThread, Signal
 
 if TYPE_CHECKING:
     from squid_tools.processing.base import ProcessingPlugin
@@ -26,9 +26,9 @@ class _Worker(QObject):
 
     def __init__(
         self,
-        plugin: "ProcessingPlugin",
+        plugin: ProcessingPlugin,
         selection: set[int] | None,
-        engine: "ViewportEngine",
+        engine: ViewportEngine,
         params: BaseModel,
     ) -> None:
         super().__init__()
@@ -74,9 +74,9 @@ class AlgorithmRunner(QObject):
 
     def run(
         self,
-        plugin: "ProcessingPlugin",
+        plugin: ProcessingPlugin,
         selection: set[int] | None,
-        engine: "ViewportEngine",
+        engine: ViewportEngine,
         params: BaseModel,
     ) -> bool:
         """Start a plugin run. Returns True if accepted, False if another is in flight."""

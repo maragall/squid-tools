@@ -131,7 +131,6 @@ class TestViewportEngine:
 
 class TestViewportEngineHelpers:
     def test_all_fov_indices(self, tmp_path):
-        from pathlib import Path
         from squid_tools.viewer.viewport_engine import ViewportEngine
         from tests.fixtures.generate_fixtures import create_individual_acquisition
 
@@ -144,7 +143,6 @@ class TestViewportEngineHelpers:
         assert indices == {0, 1, 2, 3}
 
     def test_visible_fov_indices_uses_camera(self, tmp_path):
-        from pathlib import Path
         from squid_tools.viewer.viewport_engine import ViewportEngine
         from tests.fixtures.generate_fixtures import create_individual_acquisition
 
@@ -159,7 +157,6 @@ class TestViewportEngineHelpers:
         assert visible == {0, 1, 2, 3}
 
     def test_get_nominal_positions(self, tmp_path):
-        from pathlib import Path
         from squid_tools.viewer.viewport_engine import ViewportEngine
         from tests.fixtures.generate_fixtures import create_individual_acquisition
 

@@ -62,7 +62,7 @@ class ProcessingPlugin(ABC):
     def run_live(
         self,
         selection: set[int] | None,
-        engine: "ViewportEngine",
+        engine: ViewportEngine,
         params: BaseModel,
         progress: Callable[[str, int, int], None],
     ) -> None:

@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from squid_tools.processing.flatfield.plugin import FlatfieldPlugin, FlatfieldParams
+from squid_tools.processing.flatfield.plugin import FlatfieldParams, FlatfieldPlugin
 from squid_tools.viewer.viewport_engine import ViewportEngine
 from tests.fixtures.generate_fixtures import create_individual_acquisition
 
