@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from squid_tools.core.registry import PluginRegistry
+from squid_tools.gui.algorithm_runner import AlgorithmRunner
 from squid_tools.gui.controller import AppController
 from squid_tools.gui.controls import ControlsPanel
 from squid_tools.gui.log_panel import LogPanel
@@ -89,6 +90,15 @@ class MainWindow(QMainWindow):
         self.log_panel.setMaximumHeight(150)
         self.log_panel.set_data_manager(self.controller.data_manager)
         main_layout.addWidget(self.log_panel)
+
+        # Algorithm runner (background thread)
+        self._algorithm_runner = AlgorithmRunner(self)
+        self._algorithm_runner.progress_updated.connect(self._on_run_progress)
+        self._algorithm_runner.run_complete.connect(self._on_run_complete)
+        self._algorithm_runner.run_failed.connect(self._on_run_failed)
+
+        # Connect run_requested signal from processing tabs
+        self.processing_tabs.run_requested.connect(self._on_run_requested_tab)
 
         # Lazily created continuous viewer
         self._viewer = None
@@ -238,6 +248,73 @@ class MainWindow(QMainWindow):
             else:
                 self._viewer._engine.clear_position_overrides()
                 self._viewer._refresh()
+
+    def _on_run_requested_tab(self, plugin_name: str, params_dict: dict) -> None:
+        """Run a plugin on the current selection."""
+        if self.controller.acquisition is None:
+            self.log_panel.log(f"[{plugin_name}] No acquisition loaded.")
+            self.processing_tabs.set_status(plugin_name, "No acquisition")
+            return
+        if self._viewer is None:
+            self.log_panel.log(f"[{plugin_name}] Viewer not ready.")
+            return
+        plugin = self.controller.registry.get(plugin_name)
+        if plugin is None:
+            self.log_panel.log(f"[{plugin_name}] Plugin not registered.")
+            return
+
+        selection = self.viewer_selection() or None  # None means all
+        params_cls = plugin.parameters()
+        params = (
+            params_cls(**params_dict)
+            if params_dict
+            else plugin.default_params(
+                self.controller.acquisition.optical
+                if self.controller.acquisition
+                else None
+            )
+        )
+        ok = self._algorithm_runner.run(
+            plugin=plugin,
+            selection=selection,
+            engine=self._viewer._engine,
+            params=params,
+        )
+        if not ok:
+            self.log_panel.log(f"[{plugin_name}] Wait for current run to finish.")
+            self.processing_tabs.set_status(plugin_name, "Waiting: another run in progress")
+        else:
+            sel_text = f"{len(selection)} tiles" if selection else "all FOVs"
+            self.log_panel.log(f"[{plugin_name}] Run started on {sel_text}.")
+            self.processing_tabs.set_status(plugin_name, "Running...")
+
+    def viewer_selection(self) -> set[int]:
+        """Return the current selection (empty set if no viewer)."""
+        if self._viewer is None:
+            return set()
+        return self._viewer.selection.selected
+
+    def _on_run_progress(
+        self, plugin_name: str, phase: str, current: int, total: int,
+    ) -> None:
+        self.processing_tabs.set_status(
+            plugin_name, f"{phase}: {current}/{total}",
+        )
+
+    def _on_run_complete(self, plugin_name: str, tiles_processed: int) -> None:
+        self.processing_tabs.mark_calibrated(plugin_name)
+        self.processing_tabs.set_status(
+            plugin_name, f"Applied to {tiles_processed} tiles",
+        )
+        self.log_panel.log(f"[{plugin_name}] Complete.")
+        # Refresh viewer so position overrides / pipeline changes show
+        if self._viewer is not None:
+            self._viewer._canvas.clear()
+            self._viewer._refresh()
+
+    def _on_run_failed(self, plugin_name: str, error_message: str) -> None:
+        self.processing_tabs.set_status(plugin_name, f"Failed: {error_message[:80]}")
+        self.log_panel.log(f"[{plugin_name}] FAILED: {error_message}")
 
     def _run_registration(self) -> None:
         """Run registration on visible tiles and update positions."""
