@@ -52,6 +52,15 @@ class TestLoggerWiring:
             def instance():
                 return None
 
+        class FakeRegistry:
+            @staticmethod
+            def register(p: object) -> None:
+                pass
+
+        class FakeController:
+            registry = FakeRegistry()
+            acquisition = None
+
         class FakeWindow:
             def __init__(self, *a, **kw):
                 calls.append("MainWindow")
@@ -59,7 +68,7 @@ class TestLoggerWiring:
                 pass
             def open_acquisition(self, *a, **kw):
                 pass
-            controller = type("C", (), {"registry": type("R", (), {"register": staticmethod(lambda p: None)})(), "acquisition": None})()
+            controller = FakeController()
 
         monkeypatch.setattr("squid_tools.logger.setup_logging", fake_setup)
         monkeypatch.setattr("PySide6.QtWidgets.QApplication", FakeApp)
