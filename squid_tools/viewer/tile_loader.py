@@ -64,13 +64,12 @@ class _Worker(QObject):
             logger.exception("tile loader worker failed")
             self.request_failed.emit(req.request_id, str(exc))
             return
+        self.tiles_ready.emit(req.request_id, tiles)
         if (
             self._pending is not None
             and self._pending.request_id > req.request_id
         ):
             self._process()
-            return
-        self.tiles_ready.emit(req.request_id, tiles)
 
 
 class AsyncTileLoader(QObject):

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+import threading
+import time
 
 import pytest
 from pytestqt.qtbot import QtBot
@@ -119,5 +121,56 @@ class TestAsyncTileLoaderRequest:
             emitted_id, err = blocker.args
             assert emitted_id == 1
             assert "boom" in err
+        finally:
+            loader.stop()
+
+
+class TestAsyncTileLoaderReplaceSemantics:
+    def test_rapid_requests_last_one_wins(self, qtbot: QtBot) -> None:
+        barrier = threading.Event()
+        received = []
+
+        class SlowEngine:
+            def __init__(self):
+                self.call_count = 0
+
+            def get_composite_tiles(self, **kwargs):
+                self.call_count += 1
+                # First call blocks until barrier fires, second returns instantly
+                if self.call_count == 1:
+                    barrier.wait(timeout=2.0)
+                return [("tile", kwargs["viewport"], self.call_count)]
+
+        engine = SlowEngine()
+        loader = AsyncTileLoader(engine)
+        loader.tiles_ready.connect(
+            lambda rid, tiles: received.append((rid, tiles)),
+        )
+        try:
+            id_a = loader.request(
+                viewport=(0.0, 0.0, 1.0, 1.0),
+                screen_width=100, screen_height=100,
+                active_channels=[0], channel_names=["C1"],
+                channel_clims={0: (0.0, 1.0)},
+                z=0, timepoint=0,
+            )
+            # Wait briefly so worker picks up A
+            time.sleep(0.1)
+            id_b = loader.request(
+                viewport=(2.0, 2.0, 3.0, 3.0),
+                screen_width=100, screen_height=100,
+                active_channels=[0], channel_names=["C1"],
+                channel_clims={0: (0.0, 1.0)},
+                z=0, timepoint=0,
+            )
+            barrier.set()
+            qtbot.waitUntil(
+                lambda: any(rid == id_b for rid, _ in received), timeout=3000,
+            )
+            ids = [rid for rid, _ in received]
+            assert id_a in ids
+            assert id_b in ids
+            b_tiles = next(t for rid, t in received if rid == id_b)
+            assert b_tiles[0][2] == 2
         finally:
             loader.stop()
