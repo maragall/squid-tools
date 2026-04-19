@@ -6,6 +6,7 @@ signals back to the GUI thread via Qt.
 
 from __future__ import annotations
 
+import logging
 import traceback
 from typing import TYPE_CHECKING
 
@@ -15,6 +16,8 @@ from PySide6.QtCore import QObject, QThread, Signal
 if TYPE_CHECKING:
     from squid_tools.processing.base import ProcessingPlugin
     from squid_tools.viewer.viewport_engine import ViewportEngine
+
+logger = logging.getLogger(__name__)
 
 
 class _Worker(QObject):
@@ -82,6 +85,7 @@ class AlgorithmRunner(QObject):
         """Start a plugin run. Returns True if accepted, False if another is in flight."""
         if self.is_running():
             return False
+        logger.info("Starting plugin run: %s", plugin.name)
         thread = QThread()
         worker = _Worker(plugin, selection, engine, params)
         worker.moveToThread(thread)
@@ -95,10 +99,17 @@ class AlgorithmRunner(QObject):
         return True
 
     def _on_complete(self, plugin_name: str, tiles_processed: int) -> None:
+        logger.info(
+            "Plugin run complete: %s (%d tiles)", plugin_name, tiles_processed,
+        )
         self.run_complete.emit(plugin_name, tiles_processed)
         self._cleanup()
 
     def _on_failed(self, plugin_name: str, error_message: str) -> None:
+        logger.error(
+            "Plugin run failed: %s — %s",
+            plugin_name, error_message.splitlines()[0],
+        )
         self.run_failed.emit(plugin_name, error_message)
         self._cleanup()
 

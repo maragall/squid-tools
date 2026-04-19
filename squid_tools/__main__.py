@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 
 
@@ -33,10 +34,15 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    import os
+    from squid_tools.logger import setup_logging  # noqa: PLC0415
+
+    log_dir = setup_logging()
+    logging.getLogger("squid_tools").info("Logging to %s", log_dir)
+
+    import os  # noqa: PLC0415
     os.environ.setdefault("QT_QPA_PLATFORM", os.environ.get("QT_QPA_PLATFORM", ""))
 
-    from pathlib import Path
+    from pathlib import Path  # noqa: PLC0415
 
     from PySide6.QtWidgets import QApplication  # noqa: PLC0415
 

@@ -29,3 +29,54 @@ class TestCLIEntry:
         )
         assert result.returncode == 0
         assert "0.1.0" in result.stdout
+
+
+class TestLoggerWiring:
+    def test_main_calls_setup_logging_before_qapplication(self, monkeypatch, tmp_path) -> None:
+        import sys
+
+        import squid_tools.__main__ as main_mod
+
+        calls: list[str] = []
+
+        def fake_setup(log_dir=None):
+            calls.append("setup_logging")
+            return tmp_path
+
+        class FakeApp:
+            def __init__(self, *a, **kw):
+                calls.append("QApplication")
+            def exec(self):
+                return 0
+            @staticmethod
+            def instance():
+                return None
+
+        class FakeRegistry:
+            @staticmethod
+            def register(p: object) -> None:
+                pass
+
+        class FakeController:
+            registry = FakeRegistry()
+            acquisition = None
+
+        class FakeWindow:
+            def __init__(self, *a, **kw):
+                calls.append("MainWindow")
+            def show(self):
+                pass
+            def open_acquisition(self, *a, **kw):
+                pass
+            controller = FakeController()
+
+        monkeypatch.setattr("squid_tools.logger.setup_logging", fake_setup)
+        monkeypatch.setattr("PySide6.QtWidgets.QApplication", FakeApp)
+        monkeypatch.setattr("squid_tools.gui.app.MainWindow", FakeWindow)
+        monkeypatch.setattr("squid_tools.gui.style.apply_style", lambda app: None)
+        monkeypatch.setattr(sys, "argv", ["squid-tools"])
+        monkeypatch.setattr(sys, "exit", lambda *a, **kw: None)
+
+        main_mod.main()
+
+        assert calls.index("setup_logging") < calls.index("QApplication")
