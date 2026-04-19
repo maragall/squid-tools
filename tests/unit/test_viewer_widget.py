@@ -51,6 +51,7 @@ class TestViewerWidget:
         qtbot.addWidget(widget)
         widget.load_acquisition(acq_path, region="0")
         assert widget._engine.is_loaded()
+        widget.close()
 
     def test_load_acquisition_configures_sliders(self, qtbot: QtBot, tmp_path: Path) -> None:
         acq_path = create_individual_acquisition(
@@ -61,6 +62,7 @@ class TestViewerWidget:
         widget.load_acquisition(acq_path, region="0")
         assert widget.channel_slider.maximum() == 1
         assert widget.z_slider.maximum() == 1
+        widget.close()
 
     def test_set_pipeline(self, qtbot: QtBot, tmp_path: Path) -> None:
         acq_path = create_individual_acquisition(
@@ -71,3 +73,4 @@ class TestViewerWidget:
         widget.load_acquisition(acq_path, region="0")
         # Setting an empty pipeline should not crash
         widget.set_pipeline([])
+        widget.close()

@@ -17,6 +17,7 @@ class TestSelectionWorkflow:
         qtbot.addWidget(viewer)
         viewer.load_acquisition(acq_path, region="0")
         assert hasattr(viewer, "selection")
+        viewer.close()
 
     def test_selection_drawn_updates_selection(self, qtbot: QtBot, tmp_path: Path) -> None:
         acq_path = create_individual_acquisition(
@@ -31,6 +32,7 @@ class TestSelectionWorkflow:
         viewer._on_selection_drawn(bb)
         # All 4 FOVs should now be selected
         assert viewer.selection.selected == {0, 1, 2, 3}
+        viewer.close()
 
     def test_empty_rectangle_clears_selection(self, qtbot: QtBot, tmp_path: Path) -> None:
         acq_path = create_individual_acquisition(
@@ -46,3 +48,4 @@ class TestSelectionWorkflow:
         # Then draw rectangle that intersects no tiles (far away)
         viewer._on_selection_drawn((1000.0, 1000.0, 1001.0, 1001.0))
         assert viewer.selection.is_empty()
+        viewer.close()

@@ -37,3 +37,5 @@ class TestEndToEnd:
 
         # Log should show status
         assert "Loaded" in window.log_panel.status_text()
+
+        window.close()
