@@ -48,7 +48,7 @@ class QtLogHandler(QObject, logging.Handler):
         QObject.__init__(self)
         logging.Handler.__init__(self)
 
-    def emit(self, record: logging.LogRecord) -> None:  # noqa: A003
+    def emit(self, record: logging.LogRecord) -> None:  # type: ignore[override]
         from squid_tools.logger import short_tag
 
         ts = datetime.fromtimestamp(record.created).strftime("%H:%M:%S")
