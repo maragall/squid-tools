@@ -64,3 +64,60 @@ class TestAsyncTileLoaderConstruction:
         loader = AsyncTileLoader(engine)
         loader.stop()
         assert not loader._thread.isRunning()
+
+
+class TestAsyncTileLoaderRequest:
+    def _request_kwargs(self, **overrides):
+        base = dict(
+            viewport=(0.0, 0.0, 1.0, 1.0),
+            screen_width=100,
+            screen_height=100,
+            active_channels=[0],
+            channel_names=["C1"],
+            channel_clims={0: (0.0, 1.0)},
+            z=0,
+            timepoint=0,
+        )
+        base.update(overrides)
+        return base
+
+    def test_request_returns_id_and_emits_tiles_ready(self, qtbot: QtBot) -> None:
+        engine = _FakeEngine()
+        loader = AsyncTileLoader(engine)
+        try:
+            with qtbot.waitSignal(loader.tiles_ready, timeout=2000) as blocker:
+                request_id = loader.request(**self._request_kwargs())
+            emitted_id, tiles = blocker.args
+            assert emitted_id == request_id
+            assert len(tiles) == 1
+            assert len(engine.calls) == 1
+            assert engine.calls[0]["viewport"] == (0.0, 0.0, 1.0, 1.0)
+        finally:
+            loader.stop()
+
+    def test_request_ids_increment(self, qtbot: QtBot) -> None:
+        engine = _FakeEngine()
+        loader = AsyncTileLoader(engine)
+        try:
+            id1 = loader.request(**self._request_kwargs())
+            id2 = loader.request(**self._request_kwargs())
+            assert id2 == id1 + 1
+        finally:
+            loader.stop()
+
+    def test_request_failure_emits_request_failed(self, qtbot: QtBot) -> None:
+        class BrokenEngine:
+            def get_composite_tiles(self, **kwargs):
+                raise RuntimeError("boom")
+
+        loader = AsyncTileLoader(BrokenEngine())
+        try:
+            with qtbot.waitSignal(
+                loader.request_failed, timeout=2000,
+            ) as blocker:
+                loader.request(**self._request_kwargs())
+            emitted_id, err = blocker.args
+            assert emitted_id == 1
+            assert "boom" in err
+        finally:
+            loader.stop()
