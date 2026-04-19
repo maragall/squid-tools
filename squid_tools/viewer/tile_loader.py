@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QObject, QThread, Qt, Signal
+from PySide6.QtCore import QObject, Qt, QThread, Signal
 
 if TYPE_CHECKING:
     from squid_tools.viewer.viewport_engine import ViewportEngine
@@ -35,7 +35,7 @@ class _Worker(QObject):
     tiles_ready = Signal(int, object)
     request_failed = Signal(int, str)
 
-    def __init__(self, engine: "ViewportEngine") -> None:
+    def __init__(self, engine: ViewportEngine) -> None:
         super().__init__()
         self._engine = engine
         self._pending: TileRequest | None = None
@@ -83,7 +83,7 @@ class AsyncTileLoader(QObject):
 
     def __init__(
         self,
-        engine: "ViewportEngine",
+        engine: ViewportEngine,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 
 import pytest
@@ -45,7 +46,7 @@ class TestTileRequest:
             timepoint=0,
         )
         assert req.request_id == 1
-        with pytest.raises(Exception):
+        with pytest.raises(dataclasses.FrozenInstanceError):
             req.request_id = 2  # frozen
 
 
