@@ -1,5 +1,6 @@
 """Tests for AlgorithmRunner."""
 
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -105,9 +106,6 @@ class TestAlgorithmRunner:
         accepted = runner.run(plugin=plugin, selection={1}, engine=engine, params=_Params())
         assert accepted is False
         qtbot.waitUntil(lambda: not runner.is_running(), timeout=5000)
-
-
-import logging
 
 
 class TestAlgorithmRunnerLogging:

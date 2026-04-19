@@ -11,8 +11,6 @@ import logging
 from pathlib import Path
 from typing import Any
 
-logger = logging.getLogger(__name__)
-
 import numpy as np
 
 from squid_tools.core.data_model import Acquisition, FrameKey
@@ -22,6 +20,8 @@ from squid_tools.core.readers.base import FormatReader
 from squid_tools.core.registry import PluginRegistry
 from squid_tools.core.sidecar import SidecarManifest
 from squid_tools.viewer.data_manager import ViewportDataManager
+
+logger = logging.getLogger(__name__)
 
 
 class AppController:

@@ -10,14 +10,14 @@ import logging
 import traceback
 from typing import TYPE_CHECKING
 
-logger = logging.getLogger(__name__)
-
 from pydantic import BaseModel
 from PySide6.QtCore import QObject, QThread, Signal
 
 if TYPE_CHECKING:
     from squid_tools.processing.base import ProcessingPlugin
     from squid_tools.viewer.viewport_engine import ViewportEngine
+
+logger = logging.getLogger(__name__)
 
 
 class _Worker(QObject):

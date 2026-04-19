@@ -1,6 +1,9 @@
 """Tests for AppController."""
 
+import logging
 from pathlib import Path
+
+import pytest
 
 from squid_tools.core.data_model import AcquisitionFormat
 from squid_tools.gui.controller import AppController
@@ -83,11 +86,6 @@ class TestAppController:
         assert np.all(result == frame + 10)
 
 
-import logging
-
-import pytest
-
-
 class TestControllerLogging:
     def test_load_emits_info_log(self, tmp_path, individual_acquisition, caplog):
         from squid_tools.gui.controller import AppController
@@ -106,7 +104,7 @@ class TestControllerLogging:
 
         controller = AppController()
         caplog.set_level(logging.ERROR, logger="squid_tools")
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             controller.load_acquisition(tmp_path / "does_not_exist")
         errors = [
             r for r in caplog.records
