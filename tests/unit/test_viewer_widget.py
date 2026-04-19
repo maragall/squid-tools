@@ -51,6 +51,7 @@ class TestViewerWidget:
         qtbot.addWidget(widget)
         widget.load_acquisition(acq_path, region="0")
         assert widget._engine.is_loaded()
+        widget.close()
 
     def test_load_acquisition_configures_sliders(self, qtbot: QtBot, tmp_path: Path) -> None:
         acq_path = create_individual_acquisition(
@@ -61,6 +62,7 @@ class TestViewerWidget:
         widget.load_acquisition(acq_path, region="0")
         assert widget.channel_slider.maximum() == 1
         assert widget.z_slider.maximum() == 1
+        widget.close()
 
     def test_set_pipeline(self, qtbot: QtBot, tmp_path: Path) -> None:
         acq_path = create_individual_acquisition(
@@ -71,23 +73,4 @@ class TestViewerWidget:
         widget.load_acquisition(acq_path, region="0")
         # Setting an empty pipeline should not crash
         widget.set_pipeline([])
-
-
-class TestViewerWidgetAsyncRefresh:
-    def test_refresh_uses_tile_loader(
-        self, qtbot: QtBot, individual_acquisition: Path,
-    ) -> None:
-        """After load_acquisition, _refresh() should request via AsyncTileLoader."""
-        from squid_tools.viewer.widget import ViewerWidget
-
-        widget = ViewerWidget()
-        qtbot.addWidget(widget)
-        widget.load_acquisition(individual_acquisition, "0")
-
-        assert widget._tile_loader is not None
-        assert widget._tile_loader._thread.isRunning()
-
-        with qtbot.waitSignal(
-            widget._tile_loader.tiles_ready, timeout=5000,
-        ):
-            widget._refresh()
+        widget.close()

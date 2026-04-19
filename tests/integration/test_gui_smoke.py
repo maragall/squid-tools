@@ -60,6 +60,7 @@ class TestMainWindowDataLoading:
         region_id = window.region_selector.selected_region_id()
         regions = window.controller.acquisition.regions
         assert region_id is not None or len(regions) > 0
+        window.close()
 
 
 class TestPluginsRegistered:

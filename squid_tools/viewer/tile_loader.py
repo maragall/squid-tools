@@ -87,6 +87,7 @@ class AsyncTileLoader(QObject):
     ) -> None:
         super().__init__(parent)
         self._next_id = 0
+        self._stopped = False
         self._thread = QThread()
         self._thread.setObjectName("tile-loader")
         self._worker = _Worker(engine)
@@ -129,13 +130,13 @@ class AsyncTileLoader(QObject):
         return self._next_id
 
     def stop(self) -> None:
-        """Quit the worker thread."""
-        if self._thread.isRunning():
+        """Quit the worker thread. Safe to call multiple times."""
+        if self._stopped:
+            return
+        self._stopped = True
+        try:
             self._thread.quit()
             self._thread.wait(2000)
-
-    def __del__(self) -> None:
-        """Ensure worker thread is stopped when this object is collected."""
-        import contextlib
-        with contextlib.suppress(Exception):
-            self.stop()
+        except RuntimeError:
+            # C++ QThread object already deleted — nothing to do.
+            pass
