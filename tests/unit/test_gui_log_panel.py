@@ -113,3 +113,67 @@ class TestLogPanelGPUIntegration:
         # Should contain either a GPU name or "CPU only"
         assert "GPU:" in gpu_text
         assert len(gpu_text) > 5  # "GPU: " + something
+
+
+class TestLogPanelLevelFilter:
+    def test_default_level_is_info(self, qtbot: QtBot) -> None:
+        from squid_tools.gui.log_panel import LogPanel
+
+        panel = LogPanel()
+        qtbot.addWidget(panel)
+        assert panel._console_level == logging.INFO
+        assert panel._level_filter.currentText() == "INFO"
+
+    def test_logging_info_appears_in_console(self, qtbot: QtBot) -> None:
+        from squid_tools.gui.log_panel import LogPanel
+
+        panel = LogPanel()
+        qtbot.addWidget(panel)
+        logger = logging.getLogger("squid_tools.viewer.test")
+        logger.info("visible info")
+        text = panel._console.toPlainText()
+        assert "visible info" in text
+        assert "[INFO]" in text
+        assert "[viewer]" in text
+
+    def test_debug_hidden_at_info_level(self, qtbot: QtBot) -> None:
+        from squid_tools.gui.log_panel import LogPanel
+
+        panel = LogPanel()
+        qtbot.addWidget(panel)
+        logging.getLogger("squid_tools.viewer.test").debug("secret debug")
+        assert "secret debug" not in panel._console.toPlainText()
+
+    def test_debug_visible_when_level_changed_to_debug(self, qtbot: QtBot) -> None:
+        from squid_tools.gui.log_panel import LogPanel
+
+        panel = LogPanel()
+        qtbot.addWidget(panel)
+        panel._level_filter.setCurrentText("DEBUG")
+        logging.getLogger("squid_tools.viewer.test").debug("now visible debug")
+        assert "now visible debug" in panel._console.toPlainText()
+
+    def test_warn_label_maps_to_warning(self, qtbot: QtBot) -> None:
+        from squid_tools.gui.log_panel import LogPanel
+
+        panel = LogPanel()
+        qtbot.addWidget(panel)
+        panel._level_filter.setCurrentText("WARN")
+        logging.getLogger("squid_tools.viewer.test").info("info hidden")
+        logging.getLogger("squid_tools.viewer.test").warning("warn visible")
+        text = panel._console.toPlainText()
+        assert "info hidden" not in text
+        assert "warn visible" in text
+
+
+class TestLogPanelLegacyLog:
+    def test_legacy_log_routes_through_logging(self, qtbot: QtBot) -> None:
+        from squid_tools.gui.log_panel import LogPanel
+
+        panel = LogPanel()
+        qtbot.addWidget(panel)
+        panel.log("legacy message")
+        text = panel._console.toPlainText()
+        assert "legacy message" in text
+        assert "[gui]" in text
+        assert "[INFO]" in text

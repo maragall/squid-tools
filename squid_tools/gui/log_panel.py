@@ -12,6 +12,7 @@ from datetime import datetime
 
 from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtWidgets import (
+    QComboBox,
     QHBoxLayout,
     QLabel,
     QPlainTextEdit,
@@ -89,7 +90,17 @@ class LogPanel(QWidget):
         self._memory_label = QLabel("Heap: --")
         self._gpu_label = QLabel("GPU: detecting...")
 
+        self._console_level = logging.INFO
+        self._level_filter = QComboBox()
+        self._level_filter.addItems(["DEBUG", "INFO", "WARN", "ERROR"])
+        self._level_filter.setCurrentText("INFO")
+        self._level_filter.setToolTip(
+            "Console log verbosity (file always captures DEBUG)"
+        )
+        self._level_filter.currentTextChanged.connect(self._on_level_changed)
+
         status_row.addWidget(self._status_label, stretch=2)
+        status_row.addWidget(self._level_filter)
         status_row.addWidget(self._cache_label, stretch=2)
         status_row.addWidget(self._memory_label, stretch=1)
         status_row.addWidget(self._gpu_label, stretch=1)
@@ -104,10 +115,41 @@ class LogPanel(QWidget):
         self._mem_timer.timeout.connect(self._update_memory)
         self._mem_timer.start(500)
 
+        self._qt_handler = QtLogHandler()
+        self._qt_handler.setLevel(logging.DEBUG)
+        self._qt_handler.record_emitted.connect(self._on_log_record)
+        _sq_logger = logging.getLogger("squid_tools")
+        _sq_logger.setLevel(logging.DEBUG)
+        _sq_logger.addHandler(self._qt_handler)
+
     def log(self, message: str) -> None:
-        """Append a timestamped message to the console."""
-        ts = datetime.now().strftime("%H:%M:%S")
-        self._console.appendPlainText(f"[{ts}] {message}")
+        """Backwards-compat: route a plain string through Python logging at INFO."""
+        logging.getLogger("squid_tools.gui").info(message)
+
+    def _on_log_record(
+        self, ts: str, level: int, tag: str, message: str,
+    ) -> None:
+        if level < self._console_level:
+            return
+        level_name = logging.getLevelName(level)
+        self._console.appendPlainText(
+            f"[{ts}] [{level_name}] [{tag}] {message}"
+        )
+
+    def _on_level_changed(self, text: str) -> None:
+        mapping = {
+            "DEBUG": logging.DEBUG,
+            "INFO": logging.INFO,
+            "WARN": logging.WARNING,
+            "ERROR": logging.ERROR,
+        }
+        self._console_level = mapping.get(text, logging.INFO)
+
+    def closeEvent(self, event: object) -> None:  # noqa: N802
+        try:
+            logging.getLogger("squid_tools").removeHandler(self._qt_handler)
+        finally:
+            super().closeEvent(event)  # type: ignore[arg-type]
 
     def text(self) -> str:
         """Return last log line."""
