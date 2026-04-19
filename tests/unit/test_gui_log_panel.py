@@ -1,8 +1,77 @@
 """Tests for log panel widget."""
 
+import logging
+
+import pytest
 from pytestqt.qtbot import QtBot
 
 from squid_tools.gui.log_panel import LogPanel
+
+
+@pytest.fixture(autouse=True)
+def _reset_root_logger():
+    root = logging.getLogger("squid_tools")
+    saved = list(root.handlers)
+    yield
+    for h in list(root.handlers):
+        root.removeHandler(h)
+    for h in saved:
+        root.addHandler(h)
+
+
+class TestQtLogHandler:
+    def test_emits_record_emitted_signal(self, qtbot: QtBot) -> None:
+        from squid_tools.gui.log_panel import QtLogHandler
+
+        handler = QtLogHandler()
+        handler.setLevel(logging.DEBUG)
+
+        with qtbot.waitSignal(handler.record_emitted, timeout=500) as blocker:
+            record = logging.LogRecord(
+                name="squid_tools.viewer.widget",
+                level=logging.INFO,
+                pathname=__file__,
+                lineno=1,
+                msg="hello world",
+                args=(),
+                exc_info=None,
+            )
+            handler.emit(record)
+
+        ts, level, tag, message = blocker.args
+        assert isinstance(ts, str) and len(ts) == 8  # HH:MM:SS
+        assert level == logging.INFO
+        assert tag == "viewer"
+        assert message == "hello world"
+
+    def test_includes_traceback_when_exc_info_set(self, qtbot: QtBot) -> None:
+        from squid_tools.gui.log_panel import QtLogHandler
+
+        handler = QtLogHandler()
+        handler.setLevel(logging.DEBUG)
+
+        try:
+            raise ValueError("boom")
+        except ValueError:
+            import sys
+            exc_info = sys.exc_info()
+
+        with qtbot.waitSignal(handler.record_emitted, timeout=500) as blocker:
+            record = logging.LogRecord(
+                name="squid_tools.gui.app",
+                level=logging.ERROR,
+                pathname=__file__,
+                lineno=1,
+                msg="error happened",
+                args=(),
+                exc_info=exc_info,
+            )
+            handler.emit(record)
+
+        _, _, _, message = blocker.args
+        assert "error happened" in message
+        assert "ValueError: boom" in message
+        assert "Traceback" in message
 
 
 class TestLogPanel:

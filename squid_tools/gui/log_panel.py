@@ -6,10 +6,11 @@ Console: scrollable text log showing every action, error, and data flow event.
 
 from __future__ import annotations
 
+import logging
 import os
 from datetime import datetime
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -30,6 +31,32 @@ def _get_rss_mb() -> float:
         return rss_kb / 1024
     except Exception:
         return 0.0
+
+
+class QtLogHandler(QObject, logging.Handler):
+    """Logging handler that emits a Qt signal per record.
+
+    Must subclass QObject for signals. Multiple-inheritance with
+    logging.Handler is fine because Handler is a pure-Python class.
+    """
+
+    record_emitted = Signal(str, int, str, str)
+    # (timestamp_str HH:MM:SS, level_int, short_tag_str, message_str)
+
+    def __init__(self) -> None:
+        QObject.__init__(self)
+        logging.Handler.__init__(self)
+
+    def emit(self, record: logging.LogRecord) -> None:  # noqa: A003
+        from squid_tools.logger import short_tag
+
+        ts = datetime.fromtimestamp(record.created).strftime("%H:%M:%S")
+        tag = short_tag(record.name)
+        msg = record.getMessage()
+        if record.exc_info:
+            tb = logging.Formatter().formatException(record.exc_info)
+            msg = f"{msg}\n{tb}"
+        self.record_emitted.emit(ts, record.levelno, tag, msg)
 
 
 class LogPanel(QWidget):
