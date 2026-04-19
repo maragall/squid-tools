@@ -1,0 +1,50 @@
+"""squid-tools logging setup.
+
+Call setup_logging() once at app startup. All other code uses:
+
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info("something")
+    logger.debug("detailed thing")
+    logger.error("failed: %s", reason)
+
+Records go to a rotating file (DEBUG+) and to whatever handler the GUI
+attaches to the 'squid_tools' logger (e.g. QtLogHandler in LogPanel).
+"""
+
+from __future__ import annotations
+
+import logging
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
+
+FILE_FORMAT = "%(asctime)s [%(levelname)s] [%(name)s] %(message)s"
+_DEFAULT_LOG_DIR = Path.home() / ".squid-tools" / "logs"
+
+
+def setup_logging(log_dir: Path | None = None) -> Path:
+    """Configure the squid_tools root logger. Idempotent.
+
+    Returns the log directory actually used.
+    """
+    if log_dir is None:
+        log_dir = _DEFAULT_LOG_DIR
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    root = logging.getLogger("squid_tools")
+    root.setLevel(logging.DEBUG)
+
+    for h in list(root.handlers):
+        root.removeHandler(h)
+
+    file_handler = RotatingFileHandler(
+        log_dir / "squid-tools.log",
+        maxBytes=10 * 1024 * 1024,
+        backupCount=5,
+        encoding="utf-8",
+    )
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(logging.Formatter(FILE_FORMAT))
+    root.addHandler(file_handler)
+
+    return log_dir
