@@ -55,3 +55,18 @@ def setup_logging(log_dir: Path | None = None) -> Path:
     root.addHandler(file_handler)
 
     return log_dir
+
+
+def short_tag(logger_name: str) -> str:
+    """Return the short component tag for console display.
+
+    squid_tools.viewer.widget           -> viewer
+    squid_tools.processing.flatfield.X  -> processing
+    squid_tools.core.cache              -> core
+    squid_tools.gui.app                 -> gui
+    anything else                        -> last module component
+    """
+    parts = logger_name.split(".")
+    if parts[:1] == ["squid_tools"] and len(parts) >= 2:
+        return parts[1]
+    return parts[-1]

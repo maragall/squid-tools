@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from squid_tools.logger import setup_logging
+from squid_tools.logger import setup_logging, short_tag
 
 
 @pytest.fixture(autouse=True)
@@ -82,3 +82,23 @@ class TestSetupLoggingFallback:
         file_handlers = [h for h in root.handlers if isinstance(h, RotatingFileHandler)]
         assert len(file_handlers) == 1
         assert str(log_dir) in file_handlers[0].baseFilename
+
+
+class TestShortTag:
+    def test_viewer_module(self) -> None:
+        assert short_tag("squid_tools.viewer.widget") == "viewer"
+
+    def test_processing_module(self) -> None:
+        assert short_tag("squid_tools.processing.flatfield.plugin") == "processing"
+
+    def test_core_module(self) -> None:
+        assert short_tag("squid_tools.core.cache") == "core"
+
+    def test_gui_module(self) -> None:
+        assert short_tag("squid_tools.gui.app") == "gui"
+
+    def test_top_level(self) -> None:
+        assert short_tag("squid_tools") == "squid_tools"
+
+    def test_unknown_namespace(self) -> None:
+        assert short_tag("thirdparty.module.submod") == "submod"
