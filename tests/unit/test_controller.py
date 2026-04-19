@@ -81,3 +81,36 @@ class TestAppController:
         frame = ctrl.get_frame(region="0", fov=0, z=0, channel=0, timepoint=0)
         result = ctrl.run_plugin("Add", frame)
         assert np.all(result == frame + 10)
+
+
+import logging
+
+import pytest
+
+
+class TestControllerLogging:
+    def test_load_emits_info_log(self, tmp_path, individual_acquisition, caplog):
+        from squid_tools.gui.controller import AppController
+
+        controller = AppController()
+        caplog.set_level(logging.INFO, logger="squid_tools")
+        controller.load_acquisition(individual_acquisition)
+        messages = [
+            r.getMessage() for r in caplog.records
+            if r.name.startswith("squid_tools.gui.controller")
+        ]
+        assert any("Loaded acquisition" in m for m in messages)
+
+    def test_load_failure_emits_error_log(self, tmp_path, caplog):
+        from squid_tools.gui.controller import AppController
+
+        controller = AppController()
+        caplog.set_level(logging.ERROR, logger="squid_tools")
+        with pytest.raises(Exception):
+            controller.load_acquisition(tmp_path / "does_not_exist")
+        errors = [
+            r for r in caplog.records
+            if r.name.startswith("squid_tools.gui.controller")
+            and r.levelno == logging.ERROR
+        ]
+        assert errors, "controller should log ERROR on failure"

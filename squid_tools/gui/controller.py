@@ -7,8 +7,11 @@ All business logic lives here, not in widgets.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 import numpy as np
 
@@ -38,10 +41,20 @@ class AppController:
 
     def load_acquisition(self, path: Path) -> Acquisition:
         """Load an acquisition directory. Auto-detects format."""
-        self._reader = detect_reader(path)
-        self.acquisition = self._reader.read_metadata(path)
-        self.sidecar = SidecarManifest(acquisition_path=path)
-        self.data_manager.load(path)
+        try:
+            self._reader = detect_reader(path)
+            self.acquisition = self._reader.read_metadata(path)
+            self.sidecar = SidecarManifest(acquisition_path=path)
+            self.data_manager.load(path)
+        except Exception:
+            logger.exception("Failed to load acquisition at %s", path)
+            raise
+        logger.info(
+            "Loaded acquisition %s (format=%s, regions=%d)",
+            path,
+            self.acquisition.format.value,
+            len(self.acquisition.regions),
+        )
         return self.acquisition
 
     def get_frame(

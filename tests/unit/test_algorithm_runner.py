@@ -105,3 +105,35 @@ class TestAlgorithmRunner:
         accepted = runner.run(plugin=plugin, selection={1}, engine=engine, params=_Params())
         assert accepted is False
         qtbot.waitUntil(lambda: not runner.is_running(), timeout=5000)
+
+
+import logging
+
+
+class TestAlgorithmRunnerLogging:
+    def test_run_emits_info_log(self, qtbot, monkeypatch, caplog):
+        from squid_tools.gui.algorithm_runner import AlgorithmRunner
+
+        runner = AlgorithmRunner()
+        caplog.set_level(logging.INFO, logger="squid_tools")
+
+        class FakePlugin:
+            name = "FakePlugin"
+            def run_live(self, selection, engine, params, progress):
+                progress("phase", 1, 1)
+
+        started = runner.run(
+            plugin=FakePlugin(),
+            selection=None,
+            engine=object(),
+            params=object(),
+        )
+        assert started is True
+        qtbot.waitUntil(lambda: not runner.is_running(), timeout=2000)
+
+        infos = [
+            r for r in caplog.records
+            if r.name.startswith("squid_tools.gui.algorithm_runner")
+            and r.levelno == logging.INFO
+        ]
+        assert any("FakePlugin" in r.getMessage() for r in infos)
