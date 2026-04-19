@@ -61,3 +61,24 @@ class TestSetupLogging:
         assert "hello logger" in content
         assert "[INFO]" in content
         assert "squid_tools.test" in content
+
+
+class TestSetupLoggingFallback:
+    def test_falls_back_to_tempdir_when_primary_unwritable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Pick a path whose parent doesn't exist and cannot be created.
+        unwritable = tmp_path / "nope.txt"
+        unwritable.write_text("not a dir")  # a file, not a directory
+        target = unwritable / "logs"  # mkdir on this path will OSError
+
+        log_dir = setup_logging(log_dir=target)
+
+        # Must not be the unwritable target
+        assert log_dir != target
+        assert log_dir.is_dir()
+        # Must still install a file handler that points inside the fallback
+        root = logging.getLogger("squid_tools")
+        file_handlers = [h for h in root.handlers if isinstance(h, RotatingFileHandler)]
+        assert len(file_handlers) == 1
+        assert str(log_dir) in file_handlers[0].baseFilename

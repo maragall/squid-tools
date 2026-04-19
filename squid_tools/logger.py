@@ -15,6 +15,7 @@ attaches to the 'squid_tools' logger (e.g. QtLogHandler in LogPanel).
 from __future__ import annotations
 
 import logging
+import tempfile
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -25,15 +26,21 @@ _DEFAULT_LOG_DIR = Path.home() / ".squid-tools" / "logs"
 def setup_logging(log_dir: Path | None = None) -> Path:
     """Configure the squid_tools root logger. Idempotent.
 
-    Returns the log directory actually used.
+    Returns the log directory actually used (may be a tempdir fallback).
     """
     if log_dir is None:
         log_dir = _DEFAULT_LOG_DIR
-    log_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        log_dir = Path(tempfile.gettempdir()) / "squid-tools-logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
 
     root = logging.getLogger("squid_tools")
     root.setLevel(logging.DEBUG)
 
+    # Remove previously attached handlers so repeated calls are safe.
     for h in list(root.handlers):
         root.removeHandler(h)
 
