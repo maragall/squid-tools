@@ -130,5 +130,12 @@ class AsyncTileLoader(QObject):
 
     def stop(self) -> None:
         """Quit the worker thread."""
-        self._thread.quit()
-        self._thread.wait(2000)
+        if self._thread.isRunning():
+            self._thread.quit()
+            self._thread.wait(2000)
+
+    def __del__(self) -> None:
+        """Ensure worker thread is stopped when this object is collected."""
+        import contextlib
+        with contextlib.suppress(Exception):
+            self.stop()

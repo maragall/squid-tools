@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 
 from squid_tools.viewer.canvas import StageCanvas
 from squid_tools.viewer.selection import SelectionState
+from squid_tools.viewer.tile_loader import AsyncTileLoader
 from squid_tools.viewer.viewport_engine import ViewportEngine
 
 
@@ -35,6 +36,9 @@ class ViewerWidget(QWidget):
         self._engine = ViewportEngine()
         self._region: str = ""
         self._channels: list[str] = []
+
+        self._tile_loader: AsyncTileLoader | None = None
+        self._last_applied_id: int = 0
 
         self.selection = SelectionState(self)
         self._canvas.selection_drawn.connect(self._on_selection_drawn)
@@ -98,6 +102,15 @@ class ViewerWidget(QWidget):
         acq = reader.read_metadata(path)
 
         self._engine.load(path, region)
+
+        # Rebuild the async tile loader on each acquisition load so it
+        # always targets the current engine state.
+        if self._tile_loader is not None:
+            self._tile_loader.stop()
+        self._tile_loader = AsyncTileLoader(self._engine, parent=self)
+        self._tile_loader.tiles_ready.connect(self._on_tiles_ready)
+        self._last_applied_id = 0
+
         self._region = region
         self._channels = [ch.name for ch in acq.channels]
         self._active_channels = list(range(len(acq.channels)))
@@ -203,24 +216,37 @@ class ViewerWidget(QWidget):
         self._refresh()
 
     def _refresh(self) -> None:
-        """Load and render composite tiles for the current viewport."""
+        """Dispatch a tile request to the async loader. Non-blocking."""
         if not self._engine.is_loaded():
+            return
+        if self._tile_loader is None:
             return
         viewport = self._canvas.get_viewport()
         sw, sh = self._canvas.get_screen_size()
         if sw == 0 or sh == 0:
             return
-
-        tiles = self._engine.get_composite_tiles(
+        self._tile_loader.request(
             viewport=viewport,
-            screen_width=sw, screen_height=sh,
+            screen_width=sw,
+            screen_height=sh,
             active_channels=self._active_channels,
             channel_names=self._channels,
             channel_clims=self._channel_clims,
             z=self.z_slider.value(),
             timepoint=self.t_slider.value(),
         )
-        self._canvas.render_tiles(tiles)
+
+    def _on_tiles_ready(self, request_id: int, tiles: object) -> None:
+        """Apply tiles to canvas, filtering out stale (superseded) replies."""
+        if request_id < self._last_applied_id:
+            return
+        self._last_applied_id = request_id
+        self._canvas.render_tiles(tiles)  # type: ignore[arg-type]
+
+    def closeEvent(self, event: object) -> None:  # noqa: N802
+        if self._tile_loader is not None:
+            self._tile_loader.stop()
+        super().closeEvent(event)  # type: ignore[arg-type]
 
     def _on_selection_drawn(
         self, rect: tuple[float, float, float, float],
