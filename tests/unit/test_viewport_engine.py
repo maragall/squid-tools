@@ -1,5 +1,6 @@
 """Tests for viewport-aware tile loading engine."""
 
+import logging
 from pathlib import Path
 
 from squid_tools.viewer.viewport_engine import ViewportEngine
@@ -169,3 +170,18 @@ class TestViewportEngineHelpers:
         assert 0 in positions and 1 in positions
         assert isinstance(positions[0], tuple)
         assert len(positions[0]) == 2
+
+
+class TestViewportEngineLogging:
+    def test_load_emits_debug_log(self, individual_acquisition, caplog):
+        from squid_tools.viewer.viewport_engine import ViewportEngine
+
+        caplog.set_level(logging.DEBUG, logger="squid_tools")
+        engine = ViewportEngine()
+        engine.load(individual_acquisition, "0")
+        debugs = [
+            r for r in caplog.records
+            if r.name.startswith("squid_tools.viewer.viewport_engine")
+            and r.levelno == logging.DEBUG
+        ]
+        assert debugs, "engine.load should emit at least one DEBUG log"

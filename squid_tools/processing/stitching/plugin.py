@@ -6,6 +6,7 @@ stitching (multiple tiles + positions -> fused image).
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import numpy as np
@@ -18,6 +19,8 @@ from squid_tools.processing.stitching.fusion import (
     normalize_shard,
 )
 from squid_tools.processing.stitching.utils import make_1d_profile
+
+logger = logging.getLogger(__name__)
 
 
 class StitcherParams(BaseModel):
@@ -246,6 +249,7 @@ class StitcherPlugin(ProcessingPlugin):
 
         # Phase 2: Register progressively
         total = len(pairs)
+        logger.info("Stitcher: pairwise registration on %d tiles", len(sorted_ids))
         pairwise_metrics: dict[tuple[int, int], tuple[int, int, float]] = {}
 
         for k, (i_pos, j_pos, _dy, _dx, _ov_y, _ov_x) in enumerate(pairs):
@@ -275,6 +279,7 @@ class StitcherPlugin(ProcessingPlugin):
             return
 
         # Phase 3: Optimize & publish positions
+        logger.info("Stitcher: global optimization (%d positions)", len(sorted_ids))
         progress("Optimizing", 0, 1)
         links = links_from_pairwise_metrics(pairwise_metrics)
         try:

@@ -12,6 +12,7 @@ No pyramids. No pre-computation. Faster than the user's eyes.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -23,6 +24,8 @@ from squid_tools.core.data_model import Acquisition, FrameKey
 from squid_tools.core.readers import detect_reader
 from squid_tools.core.readers.base import FormatReader
 from squid_tools.viewer.spatial_index import SpatialIndex
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -75,6 +78,15 @@ class ViewportEngine:
         self._tile_h_mm = self._tile_h_px * pixel_size / 1000
 
         self._index = SpatialIndex(region_obj, self._tile_w_mm, self._tile_h_mm)
+
+        try:
+            bb = self.bounding_box()
+        except Exception:
+            bb = None
+        logger.debug(
+            "Loaded region=%s bounds=%s fovs=%d",
+            region, bb, len(region_obj.fovs),
+        )
 
     def is_loaded(self) -> bool:
         return self._index is not None

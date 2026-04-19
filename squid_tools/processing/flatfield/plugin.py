@@ -6,6 +6,7 @@ If no flatfield is provided, uses the image's own smoothed version as estimate.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import numpy as np
@@ -13,6 +14,8 @@ from pydantic import BaseModel, ConfigDict
 
 from squid_tools.core.data_model import Acquisition, OpticalMetadata
 from squid_tools.processing.base import ProcessingPlugin
+
+logger = logging.getLogger(__name__)
 
 
 class FlatfieldParams(BaseModel):
@@ -66,6 +69,7 @@ class FlatfieldPlugin(ProcessingPlugin):
 
         n_samples = min(20, len(candidates))
         sample_indices = random.sample(sorted(candidates), n_samples)
+        logger.info("Flatfield: calibrating from %d tiles", n_samples)
         progress("Calibrating", 0, n_samples)
 
         tiles = []
@@ -80,6 +84,7 @@ class FlatfieldPlugin(ProcessingPlugin):
         flatfield, _darkfield = calculate_flatfield(tiles)
 
         # Phase 2: Apply — install a per-tile transform into the engine pipeline
+        logger.info("Flatfield: applying correction to %d tiles", len(candidates))
         progress("Applying", 0, 1)
 
         def _flatfield_transform(frame):

@@ -1,5 +1,6 @@
 """Tests for StitcherPlugin.run_live()."""
 
+import logging
 from pathlib import Path
 
 from squid_tools.processing.stitching.plugin import StitcherParams, StitcherPlugin
@@ -29,3 +30,33 @@ class TestStitcherRunLive:
         assert any("Finding pairs" in p for p in phases)
         # Registration phase emits per-pair progress
         assert any("Registering" in p or "Optimizing" in p for p in phases)
+
+
+class TestStitcherLogging:
+    def test_run_live_emits_info_log(
+        self, qtbot, individual_acquisition, caplog,
+    ):
+        from squid_tools.processing.stitching.plugin import StitcherPlugin
+        from squid_tools.viewer.viewport_engine import ViewportEngine
+
+        caplog.set_level(logging.INFO, logger="squid_tools")
+        engine = ViewportEngine()
+        engine.load(individual_acquisition, "0")
+        plugin = StitcherPlugin()
+        params = plugin.default_params(None)
+
+        def noop_progress(phase: str, current: int, total: int) -> None:
+            pass
+
+        plugin.run_live(
+            selection=None,
+            engine=engine,
+            params=params,
+            progress=noop_progress,
+        )
+        infos = [
+            r for r in caplog.records
+            if r.name.startswith("squid_tools.processing.stitching")
+            and r.levelno == logging.INFO
+        ]
+        assert infos, "Stitcher run_live should log INFO phase transitions"
