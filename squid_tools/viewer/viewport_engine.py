@@ -473,3 +473,28 @@ class ViewportEngine:
         levelled = downsample_frame(raw, level)
         self._pyramid_cache[key] = levelled
         return levelled
+
+    def _pick_level(
+        self,
+        viewport: tuple[float, float, float, float],
+        screen_width: int,
+        screen_height: int,
+    ) -> int:
+        """Select pyramid level from viewport/screen mm-per-pixel ratio."""
+        from squid_tools.viewer.pyramid import MAX_PYRAMID_LEVEL
+
+        x_min, y_min, x_max, y_max = viewport
+        if screen_width <= 0 or screen_height <= 0:
+            return 0
+        mm_per_px = max(
+            (x_max - x_min) / max(screen_width, 1),
+            (y_max - y_min) / max(screen_height, 1),
+        )
+        native_mm_per_px = self.pixel_size_um / 1000.0
+        if native_mm_per_px <= 0 or mm_per_px <= 0:
+            return 0
+        ratio = int(mm_per_px / native_mm_per_px)
+        if ratio < 2:
+            return 0
+        level = ratio.bit_length() - 1
+        return min(level, MAX_PYRAMID_LEVEL)
