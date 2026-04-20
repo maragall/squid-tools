@@ -54,6 +54,9 @@ class ViewportEngine:
         self._region: str = ""
         self._raw_cache = MemoryBoundedLRUCache(max_bytes=cache_bytes)
         self._display_cache: dict[str, np.ndarray] = {}
+        self._pyramid_cache: dict[
+            tuple[int, int, int, int, int], np.ndarray,
+        ] = {}
         self._last_screen_key: str = ""
         self._pipeline: list = []
         self._contrast: tuple[float, float] | None = None
@@ -78,6 +81,10 @@ class ViewportEngine:
         self._tile_h_mm = self._tile_h_px * pixel_size / 1000
 
         self._index = SpatialIndex(region_obj, self._tile_w_mm, self._tile_h_mm)
+
+        # Clear caches for new acquisition
+        self._display_cache.clear()
+        self._pyramid_cache.clear()
 
         try:
             bb = self.bounding_box()
@@ -334,16 +341,27 @@ class ViewportEngine:
         channel_clims: dict[int, tuple[float, float]],
         z: int = 0,
         timepoint: int = 0,
+        *,
+        level_override: int | None = None,
     ) -> list[VisibleTile]:
         """Get tiles with multi-channel additive composite.
 
         Each tile's data is an RGB float32 array (H, W, 3) composited
         from all active channels using Cephla colormaps.
+
+        level_override: if given, use this pyramid level; otherwise auto-select
+        from viewport/screen geometry via _pick_level.
         """
         from squid_tools.viewer.colormaps import composite_channels
 
         if self._index is None or self._reader is None:
             return []
+
+        level = (
+            level_override
+            if level_override is not None
+            else self._pick_level(viewport, screen_width, screen_height)
+        )
 
         x_min, y_min, x_max, y_max = viewport
         visible_fovs = self._index.query(x_min, y_min, x_max, y_max)
@@ -354,7 +372,7 @@ class ViewportEngine:
         target_tile_px = min(target_tile_px, self._tile_w_px)
 
         ch_key = "_".join(str(c) for c in sorted(active_channels))
-        screen_key = f"comp_{target_tile_px}_{ch_key}_{z}_{timepoint}"
+        screen_key = f"comp_{target_tile_px}_{ch_key}_{z}_{timepoint}_L{level}"
         cache_invalidated = screen_key != self._last_screen_key
         self._last_screen_key = screen_key
 
@@ -368,11 +386,13 @@ class ViewportEngine:
                 # Load and downsample each active channel
                 channel_data = []
                 for ch_idx in active_channels:
-                    raw = self._load_raw(fov.fov_index, z, ch_idx, timepoint)
+                    raw = self._get_pyramid(fov.fov_index, z, ch_idx, timepoint, level)
                     processed = raw.astype(np.float32)
                     for transform in self._pipeline:
                         processed = transform(processed)
-                    if target_tile_px < self._tile_w_px:
+                    # For level 0, apply legacy screen-resolution downsampling;
+                    # for level >= 1, the pyramid frame is already smaller.
+                    if level == 0 and target_tile_px < self._tile_w_px:
                         factor = target_tile_px / self._tile_w_px
                         processed = ndi_zoom(processed, factor, order=0)
 
@@ -449,3 +469,45 @@ class ViewportEngine:
         frame = self._reader.read_frame(key)
         self._raw_cache.put(cache_key, frame)
         return frame
+
+    def _get_pyramid(
+        self, fov: int, z: int, channel: int, timepoint: int, level: int,
+    ) -> np.ndarray:
+        """Return the frame at the requested pyramid level (cached for level>=1)."""
+        from squid_tools.viewer.pyramid import downsample_frame
+
+        if level == 0:
+            return self._load_raw(fov, z, channel, timepoint)
+        key = (fov, z, channel, timepoint, level)
+        cached = self._pyramid_cache.get(key)
+        if cached is not None:
+            return cached
+        raw = self._load_raw(fov, z, channel, timepoint)
+        levelled = downsample_frame(raw, level)
+        self._pyramid_cache[key] = levelled
+        return levelled
+
+    def _pick_level(
+        self,
+        viewport: tuple[float, float, float, float],
+        screen_width: int,
+        screen_height: int,
+    ) -> int:
+        """Select pyramid level from viewport/screen mm-per-pixel ratio."""
+        from squid_tools.viewer.pyramid import MAX_PYRAMID_LEVEL
+
+        x_min, y_min, x_max, y_max = viewport
+        if screen_width <= 0 or screen_height <= 0:
+            return 0
+        mm_per_px = max(
+            (x_max - x_min) / max(screen_width, 1),
+            (y_max - y_min) / max(screen_height, 1),
+        )
+        native_mm_per_px = self.pixel_size_um / 1000.0
+        if native_mm_per_px <= 0 or mm_per_px <= 0:
+            return 0
+        ratio = int(mm_per_px / native_mm_per_px)
+        if ratio < 2:
+            return 0
+        level = ratio.bit_length() - 1
+        return min(level, MAX_PYRAMID_LEVEL)

@@ -185,3 +185,129 @@ class TestViewportEngineLogging:
             and r.levelno == logging.DEBUG
         ]
         assert debugs, "engine.load should emit at least one DEBUG log"
+
+
+class TestViewportEnginePyramidCache:
+    def test_get_pyramid_level_zero_returns_raw(
+        self, individual_acquisition,
+    ) -> None:
+        from squid_tools.viewer.viewport_engine import ViewportEngine
+
+        engine = ViewportEngine()
+        engine.load(individual_acquisition, "0")
+        frame = engine._get_pyramid(fov=0, z=0, channel=0, timepoint=0, level=0)
+        assert frame.ndim in (2, 3)
+        assert (0, 0, 0, 0, 0) not in engine._pyramid_cache
+
+    def test_get_pyramid_level_one_caches_and_halves(
+        self, individual_acquisition,
+    ) -> None:
+        from squid_tools.viewer.viewport_engine import ViewportEngine
+
+        engine = ViewportEngine()
+        engine.load(individual_acquisition, "0")
+        raw = engine._load_raw(fov=0, z=0, channel=0, timepoint=0)
+        level1 = engine._get_pyramid(fov=0, z=0, channel=0, timepoint=0, level=1)
+        assert level1.shape[-2] == raw.shape[-2] // 2
+        assert level1.shape[-1] == raw.shape[-1] // 2
+        assert (0, 0, 0, 0, 1) in engine._pyramid_cache
+
+    def test_get_pyramid_cache_hit_returns_same_array(
+        self, individual_acquisition,
+    ) -> None:
+        from squid_tools.viewer.viewport_engine import ViewportEngine
+
+        engine = ViewportEngine()
+        engine.load(individual_acquisition, "0")
+        first = engine._get_pyramid(fov=0, z=0, channel=0, timepoint=0, level=2)
+        second = engine._get_pyramid(fov=0, z=0, channel=0, timepoint=0, level=2)
+        assert first is second
+
+
+class TestViewportEnginePickLevel:
+    def test_level_zero_when_zoomed_in(self, individual_acquisition) -> None:
+        from squid_tools.viewer.viewport_engine import ViewportEngine
+
+        engine = ViewportEngine()
+        engine.load(individual_acquisition, "0")
+        level = engine._pick_level(
+            viewport=(0.0, 0.0, 0.1, 0.1),
+            screen_width=10000, screen_height=10000,
+        )
+        assert level == 0
+
+    def test_higher_level_when_zoomed_out(self, individual_acquisition) -> None:
+        from squid_tools.viewer.viewport_engine import ViewportEngine
+
+        engine = ViewportEngine()
+        engine.load(individual_acquisition, "0")
+        level = engine._pick_level(
+            viewport=(0.0, 0.0, 100.0, 100.0),
+            screen_width=100, screen_height=100,
+        )
+        assert level >= 1
+
+    def test_level_capped_at_max(self, individual_acquisition) -> None:
+        from squid_tools.viewer.pyramid import MAX_PYRAMID_LEVEL
+        from squid_tools.viewer.viewport_engine import ViewportEngine
+
+        engine = ViewportEngine()
+        engine.load(individual_acquisition, "0")
+        level = engine._pick_level(
+            viewport=(0.0, 0.0, 100000.0, 100000.0),
+            screen_width=1, screen_height=1,
+        )
+        assert level == MAX_PYRAMID_LEVEL
+
+    def test_zero_screen_size_returns_level_zero(
+        self, individual_acquisition,
+    ) -> None:
+        from squid_tools.viewer.viewport_engine import ViewportEngine
+
+        engine = ViewportEngine()
+        engine.load(individual_acquisition, "0")
+        assert engine._pick_level(
+            viewport=(0.0, 0.0, 1.0, 1.0), screen_width=0, screen_height=0,
+        ) == 0
+
+
+class TestViewportEngineCompositeWithPyramid:
+    def test_level_override_passes_through(self, individual_acquisition) -> None:
+        from squid_tools.viewer.viewport_engine import ViewportEngine
+
+        engine = ViewportEngine()
+        engine.load(individual_acquisition, "0")
+        bb = engine.bounding_box()
+        tiles_level0 = engine.get_composite_tiles(
+            viewport=bb, screen_width=800, screen_height=600,
+            active_channels=[0], channel_names=["C1"],
+            channel_clims={0: (0.0, 1.0)},
+            z=0, timepoint=0,
+            level_override=0,
+        )
+        tiles_level2 = engine.get_composite_tiles(
+            viewport=bb, screen_width=800, screen_height=600,
+            active_channels=[0], channel_names=["C1"],
+            channel_clims={0: (0.0, 1.0)},
+            z=0, timepoint=0,
+            level_override=2,
+        )
+        assert len(tiles_level0) == len(tiles_level2)
+        assert any(k[4] == 2 for k in engine._pyramid_cache)
+
+    def test_auto_level_selects_when_override_none(
+        self, individual_acquisition,
+    ) -> None:
+        from squid_tools.viewer.viewport_engine import ViewportEngine
+
+        engine = ViewportEngine()
+        engine.load(individual_acquisition, "0")
+        bb = engine.bounding_box()
+        huge_vp = (bb[0] - 100.0, bb[1] - 100.0, bb[2] + 100.0, bb[3] + 100.0)
+        engine.get_composite_tiles(
+            viewport=huge_vp, screen_width=50, screen_height=50,
+            active_channels=[0], channel_names=["C1"],
+            channel_clims={0: (0.0, 1.0)},
+            z=0, timepoint=0,
+        )
+        assert any(k[4] >= 1 for k in engine._pyramid_cache)
