@@ -134,3 +134,56 @@ class TestBackendOverride:
             backend=Backend.NUMPY,
         )
         assert out.shape == (4, 4, 3)
+
+
+class TestBackendLogging:
+    def test_default_backend_logged_at_import(self, caplog) -> None:
+        import importlib
+        import logging
+
+        import squid_tools.viewer.compositor as compositor_mod
+
+        caplog.set_level(logging.INFO, logger="squid_tools.viewer.compositor")
+        importlib.reload(compositor_mod)
+        messages = [
+            r.getMessage() for r in caplog.records
+            if r.name == "squid_tools.viewer.compositor"
+            and r.levelno == logging.INFO
+        ]
+        assert any("compositor backend:" in m for m in messages)
+
+
+class TestCompositorIntegrationWithEngine:
+    def test_composite_tiles_uses_new_compositor(
+        self, individual_acquisition,
+    ) -> None:
+        from squid_tools.viewer.viewport_engine import ViewportEngine
+
+        engine = ViewportEngine()
+        engine.load(individual_acquisition, "0")
+        bb = engine.bounding_box()
+
+        # Lookup channel names from acquisition
+        acq = engine._acquisition if hasattr(engine, "_acquisition") else None
+        channel_names = (
+            [ch.name for ch in acq.channels]
+            if acq is not None
+            else ["channel_0", "channel_1"]
+        )
+
+        tiles = engine.get_composite_tiles(
+            viewport=bb, screen_width=100, screen_height=100,
+            active_channels=list(range(len(channel_names))),
+            channel_names=channel_names,
+            channel_clims={
+                i: (0.0, 1.0) for i in range(len(channel_names))
+            },
+            z=0, timepoint=0,
+            level_override=0,
+        )
+        assert len(tiles) > 0
+        first = tiles[0]
+        data = first.data if hasattr(first, "data") else first[0]
+        assert data.ndim == 3
+        assert data.shape[-1] == 3
+        assert data.dtype == np.float32
