@@ -6,8 +6,6 @@ and hex colors. Pattern from Cephla-Lab/image-stitcher.
 
 from __future__ import annotations
 
-import numpy as np
-
 # Hex colors for UI display (borders, labels, legends)
 CHANNEL_COLORS: dict[str, str] = {
     "405": "#0000FF",   # Blue (DAPI)
@@ -72,35 +70,3 @@ def get_channel_rgb(channel_name: str) -> tuple[float, float, float]:
             return rgb
     return (1.0, 1.0, 1.0)
 
-
-def composite_channels(
-    channel_data: list[tuple[np.ndarray, str, tuple[float, float]]],
-) -> np.ndarray:
-    """Additively composite multiple channels into one RGB image.
-
-    Args:
-        channel_data: list of (grayscale_frame, channel_name, (clim_low, clim_high))
-
-    Returns:
-        RGB float32 array shape (H, W, 3) in [0, 1] range.
-    """
-    if not channel_data:
-        return np.zeros((1, 1, 3), dtype=np.float32)
-
-    h, w = channel_data[0][0].shape[:2]
-    composite = np.zeros((h, w, 3), dtype=np.float32)
-    n_channels = len(channel_data)
-
-    for frame, ch_name, (clow, chigh) in channel_data:
-        rgb = get_channel_rgb(ch_name)
-        # Normalize to [0, 1] using clim
-        normalized = (frame.astype(np.float32) - clow) / max(chigh - clow, 1.0)
-        normalized = np.clip(normalized, 0.0, 1.0)
-        # Scale by number of channels so composite doesn't blow out
-        scale = 1.0 / max(n_channels, 1)
-        # Additive blend: multiply grayscale by channel color
-        for c in range(3):
-            composite[:, :, c] += normalized * rgb[c] * scale
-
-    # Clamp to [0, 1]
-    return np.clip(composite, 0.0, 1.0)
