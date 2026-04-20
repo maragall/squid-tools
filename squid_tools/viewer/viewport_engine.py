@@ -352,7 +352,8 @@ class ViewportEngine:
         level_override: if given, use this pyramid level; otherwise auto-select
         from viewport/screen geometry via _pick_level.
         """
-        from squid_tools.viewer.colormaps import composite_channels
+        from squid_tools.viewer.colormaps import get_channel_rgb
+        from squid_tools.viewer.compositor import composite_channels
 
         if self._index is None or self._reader is None:
             return []
@@ -401,7 +402,12 @@ class ViewportEngine:
                     clim = channel_clims.get(ch_idx, default_clim)
                     channel_data.append((processed, ch_name, clim))
 
-                data = composite_channels(channel_data)
+                # Note: the compositor sums channel contributions and clips at [0, 1].
+                # Heavy multi-channel regions may saturate; adjust clims to compensate.
+                frames = [cd[0] for cd in channel_data]
+                colors = [get_channel_rgb(cd[1]) for cd in channel_data]
+                clims = [cd[2] for cd in channel_data]
+                data = composite_channels(frames, clims, colors)
                 self._display_cache[display_key] = data
 
             pos = self._position_overrides.get(fov.fov_index, (fov.x_mm, fov.y_mm))
