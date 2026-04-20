@@ -341,16 +341,27 @@ class ViewportEngine:
         channel_clims: dict[int, tuple[float, float]],
         z: int = 0,
         timepoint: int = 0,
+        *,
+        level_override: int | None = None,
     ) -> list[VisibleTile]:
         """Get tiles with multi-channel additive composite.
 
         Each tile's data is an RGB float32 array (H, W, 3) composited
         from all active channels using Cephla colormaps.
+
+        level_override: if given, use this pyramid level; otherwise auto-select
+        from viewport/screen geometry via _pick_level.
         """
         from squid_tools.viewer.colormaps import composite_channels
 
         if self._index is None or self._reader is None:
             return []
+
+        level = (
+            level_override
+            if level_override is not None
+            else self._pick_level(viewport, screen_width, screen_height)
+        )
 
         x_min, y_min, x_max, y_max = viewport
         visible_fovs = self._index.query(x_min, y_min, x_max, y_max)
@@ -361,7 +372,7 @@ class ViewportEngine:
         target_tile_px = min(target_tile_px, self._tile_w_px)
 
         ch_key = "_".join(str(c) for c in sorted(active_channels))
-        screen_key = f"comp_{target_tile_px}_{ch_key}_{z}_{timepoint}"
+        screen_key = f"comp_{target_tile_px}_{ch_key}_{z}_{timepoint}_L{level}"
         cache_invalidated = screen_key != self._last_screen_key
         self._last_screen_key = screen_key
 
@@ -375,11 +386,13 @@ class ViewportEngine:
                 # Load and downsample each active channel
                 channel_data = []
                 for ch_idx in active_channels:
-                    raw = self._load_raw(fov.fov_index, z, ch_idx, timepoint)
+                    raw = self._get_pyramid(fov.fov_index, z, ch_idx, timepoint, level)
                     processed = raw.astype(np.float32)
                     for transform in self._pipeline:
                         processed = transform(processed)
-                    if target_tile_px < self._tile_w_px:
+                    # For level 0, apply legacy screen-resolution downsampling;
+                    # for level >= 1, the pyramid frame is already smaller.
+                    if level == 0 and target_tile_px < self._tile_w_px:
                         factor = target_tile_px / self._tile_w_px
                         processed = ndi_zoom(processed, factor, order=0)
 
