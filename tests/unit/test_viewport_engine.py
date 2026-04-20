@@ -185,3 +185,40 @@ class TestViewportEngineLogging:
             and r.levelno == logging.DEBUG
         ]
         assert debugs, "engine.load should emit at least one DEBUG log"
+
+
+class TestViewportEnginePyramidCache:
+    def test_get_pyramid_level_zero_returns_raw(
+        self, individual_acquisition,
+    ) -> None:
+        from squid_tools.viewer.viewport_engine import ViewportEngine
+
+        engine = ViewportEngine()
+        engine.load(individual_acquisition, "0")
+        frame = engine._get_pyramid(fov=0, z=0, channel=0, timepoint=0, level=0)
+        assert frame.ndim in (2, 3)
+        assert (0, 0, 0, 0, 0) not in engine._pyramid_cache
+
+    def test_get_pyramid_level_one_caches_and_halves(
+        self, individual_acquisition,
+    ) -> None:
+        from squid_tools.viewer.viewport_engine import ViewportEngine
+
+        engine = ViewportEngine()
+        engine.load(individual_acquisition, "0")
+        raw = engine._load_raw(fov=0, z=0, channel=0, timepoint=0)
+        level1 = engine._get_pyramid(fov=0, z=0, channel=0, timepoint=0, level=1)
+        assert level1.shape[-2] == raw.shape[-2] // 2
+        assert level1.shape[-1] == raw.shape[-1] // 2
+        assert (0, 0, 0, 0, 1) in engine._pyramid_cache
+
+    def test_get_pyramid_cache_hit_returns_same_array(
+        self, individual_acquisition,
+    ) -> None:
+        from squid_tools.viewer.viewport_engine import ViewportEngine
+
+        engine = ViewportEngine()
+        engine.load(individual_acquisition, "0")
+        first = engine._get_pyramid(fov=0, z=0, channel=0, timepoint=0, level=2)
+        second = engine._get_pyramid(fov=0, z=0, channel=0, timepoint=0, level=2)
+        assert first is second

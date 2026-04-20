@@ -54,6 +54,9 @@ class ViewportEngine:
         self._region: str = ""
         self._raw_cache = MemoryBoundedLRUCache(max_bytes=cache_bytes)
         self._display_cache: dict[str, np.ndarray] = {}
+        self._pyramid_cache: dict[
+            tuple[int, int, int, int, int], np.ndarray,
+        ] = {}
         self._last_screen_key: str = ""
         self._pipeline: list = []
         self._contrast: tuple[float, float] | None = None
@@ -78,6 +81,10 @@ class ViewportEngine:
         self._tile_h_mm = self._tile_h_px * pixel_size / 1000
 
         self._index = SpatialIndex(region_obj, self._tile_w_mm, self._tile_h_mm)
+
+        # Clear caches for new acquisition
+        self._display_cache.clear()
+        self._pyramid_cache.clear()
 
         try:
             bb = self.bounding_box()
@@ -449,3 +456,20 @@ class ViewportEngine:
         frame = self._reader.read_frame(key)
         self._raw_cache.put(cache_key, frame)
         return frame
+
+    def _get_pyramid(
+        self, fov: int, z: int, channel: int, timepoint: int, level: int,
+    ) -> np.ndarray:
+        """Return the frame at the requested pyramid level (cached for level>=1)."""
+        from squid_tools.viewer.pyramid import downsample_frame
+
+        if level == 0:
+            return self._load_raw(fov, z, channel, timepoint)
+        key = (fov, z, channel, timepoint, level)
+        cached = self._pyramid_cache.get(key)
+        if cached is not None:
+            return cached
+        raw = self._load_raw(fov, z, channel, timepoint)
+        levelled = downsample_frame(raw, level)
+        self._pyramid_cache[key] = levelled
+        return levelled
