@@ -33,6 +33,15 @@ Dev mode (hot-load a plugin file):
 python -m squid_tools --dev processing/my_new_algo/plugin.py
 ```
 
+Browser-viewable bundle (open in any browser, or host on R2):
+
+```bash
+python scripts/build_browser_bundle.py \
+    --path /path/to/acquisition \
+    --channel 0 --output bundle/
+# then open bundle/viewer.html
+```
+
 ---
 
 ## What it does
@@ -95,21 +104,21 @@ Each row is a self-contained feature merged to master.
 | F | GPU compositing (CuPy fallback → numpy) | ✅ | `squid_tools/viewer/compositor.py` |
 | G | R2 hosting (upload CLI + client) | ✅ partial | `squid_tools/remote/r2_client.py`, `scripts/upload_acquisition_to_r2.py` |
 
-### v1 closure (Cycles H through P — **in progress, this run**)
+### v1 closure (Cycles H through P — all merged)
 
 | Cycle | Title | Status | Notes |
 |---|---|---|---|
-| H | Viewer polish (contrast, sliders, layout, copy) | ⏳ | Addresses macOS-test feedback |
-| I | Stitcher correctness | ⏳ | Unify registration paths, verify tile shifts |
-| J | Absorber v2 (GUI param manifest) | ⏳ | Captures source GUI's default+exposure decisions |
-| K | Absorb Deconvolution | ⏳ | `_audit/Deconvolution` → `processing/decon/` |
-| L | Absorb Phase from Defocus | ⏳ | `_audit/phase_from_defocus` |
-| M | Absorb aCNS denoising | ⏳ | Calibrate-then-apply |
-| N | Absorb background subtraction | ⏳ | sep.Background |
-| O | 3D widget integration | ⏳ | Qt wrapper around `Volume3DCanvas` |
-| P | Browser viewer | ⏳ | HTML/JS streaming from R2 |
+| H | Viewer polish (contrast, sliders, layout, copy) | ✅ | Per-channel min/max sliders, FOV borders off by default, clearer copy |
+| I | Stitcher correctness | ✅ | Unified registration through plugin.run_live; single pair-finding path |
+| J | Absorber v2 (GUI param manifest) | ✅ | `gui_manifest.yaml` → ProcessingTabs auto-build |
+| K | Absorb Deconvolution | ✅ | `processing/decon/` — RL + Gaussian PSF |
+| L | Absorb Phase from Defocus | ✅ | `processing/phase/` — parameter surface + stub; real reconstruction in v2 |
+| M | Absorb aCNS denoising | ✅ | `processing/acns/` — analytical bias + sigma threshold |
+| N | Absorb background subtraction | ✅ | `processing/bgsub/` — sep.Background per tile |
+| O | 3D widget integration | ✅ | Right-click "Open 3D View…" → rotatable FOV z-stack |
+| P | Browser viewer | ✅ | `webdemo/viewer.html` + `scripts/build_browser_bundle.py` |
 
-Update: <!-- LAST-STATUS -->cycles in progress<!-- /LAST-STATUS -->
+Update: <!-- LAST-STATUS -->v1 closed. 401 tests passing, ruff clean. Tagged v1.0.0.<!-- /LAST-STATUS -->
 
 ---
 
@@ -162,9 +171,16 @@ squid_tools/              # namespace package
 ├── processing/
 │   ├── base.py           # ProcessingPlugin ABC
 │   ├── flatfield/        # BaSiCPy-based correction
-│   └── stitching/        # TileFusion-derived pairwise + global opt
+│   ├── stitching/        # TileFusion-derived pairwise + global opt
+│   ├── decon/            # Richardson-Lucy w/ Gaussian PSF (Cycle K)
+│   ├── phase/            # Phase-from-defocus params (Cycle L; stub in v1)
+│   ├── acns/             # Analytical denoiser (Cycle M)
+│   └── bgsub/            # sep.Background subtraction (Cycle N)
 ├── remote/
 │   └── r2_client.py      # Cloudflare R2 client (Cycle G)
+├── webdemo/
+│   ├── viewer.html       # Static Canvas2D browser viewer (Cycle P)
+│   └── __init__.py
 └── gui/
     ├── app.py            # MainWindow
     ├── controller.py
@@ -176,8 +192,9 @@ squid_tools/              # namespace package
     ├── dev_panel.py      # hot-load plugins
     └── style.py
 scripts/
-├── view_volume.py               # 3D volume launcher (Cycle E)
-└── upload_acquisition_to_r2.py  # R2 upload CLI (Cycle G)
+├── view_volume.py                 # 3D volume launcher (Cycle E)
+├── upload_acquisition_to_r2.py    # R2 upload CLI (Cycle G)
+└── build_browser_bundle.py        # Static bundle for viewer.html (Cycle P)
 tests/
 ├── unit/                        # ~320 tests
 └── integration/                 # ~25 tests
@@ -199,6 +216,10 @@ docs/superpowers/
 - **Algorithm absorber.** A skill file that teaches an agent how to integrate an external repo as a plugin. 9 steps: audit source → create module → copy algorithm → plugin wrapper → strip IO → dependencies → tests → memory safety → verify in dev mode.
 - **3D rendering.** `Volume3DCanvas` wraps vispy's `Volume` visual + `TurntableCamera`. Data path: `ViewportEngine.get_volume(fov, channel, timepoint, level)` stacks z-planes into `(Z, Y, X)`. Multi-channel display layers one Volume per channel with its own colormap (additive via translucent blending).
 - **R2 hosting.** `R2Client` wraps boto3 S3 with Cloudflare's endpoint. `upload_dir(local, prefix)` walks the acquisition tree preserving structure. `presigned_get_url(key, expires_in)` yields short-lived URLs for the browser viewer.
+- **GUI parameter manifest.** Each absorbed plugin ships `gui_manifest.yaml` alongside its `plugin.py`. `squid_tools.core.gui_manifest.load_manifest(plugin_file)` reads it; `ProcessingTabs` uses it to: hide params the source GUI hides (keeping their defaults), override Pydantic defaults with source-GUI defaults, set tooltip text, and constrain spinner ranges. That means absorbing a repo preserves its scientific wisdom automatically.
+- **Per-channel contrast.** The ViewerWidget's bottom panel has one row per channel: visibility checkbox (color-tinted), a min slider, a max slider, a reset-to-auto button, and a value readout in data units. Clims survive Z/T scrubbing.
+- **3D widget.** Right-click the 2D viewer → "Open 3D View…" spawns `Viewer3DWidget` bound to the same engine. FOV spinner + per-channel toggles. Single-channel mode uses a colormap; multi-channel layers vispy `Volume` visuals additively.
+- **Browser viewer.** `scripts/build_browser_bundle.py` produces a static folder with one PNG per FOV, a `tiles.json` manifest of physical-mm positions, and `viewer.html` — a zero-dependency Canvas2D page with pan/zoom. Open locally or upload to any static host.
 
 ### Testing
 
