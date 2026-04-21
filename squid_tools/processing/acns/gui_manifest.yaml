@@ -1,0 +1,33 @@
+name: aCNS Denoise
+source_repo: null
+source_gui: null
+notes: |
+  Analytical denoiser: dark-frame-derived bias subtraction + sigma
+  thresholding. v1 uses scalar bias and sigma; v2 will support
+  per-pixel calibration maps loaded from a dark-frame stack
+  (calibrate-then-apply pattern, same as FlatfieldPlugin).
+  Defaults (bias=100, sigma=2.5) are typical for a 12-bit CMOS
+  at 2x gain; tune to your sensor if different.
+
+parameters:
+  threshold_sigma:
+    default: 3.0
+    visible: true
+    tooltip: "Suppress values below threshold_sigma × sigma. 3 ≈ 99.7% noise floor."
+    min: 0.0
+    max: 10.0
+    step: 0.1
+  bias_value:
+    default: 100.0
+    visible: true
+    tooltip: "Per-pixel camera bias (ADU). From dark-frame mean."
+    min: 0.0
+    max: 65535.0
+    step: 1.0
+  sigma_value:
+    default: 2.5
+    visible: true
+    tooltip: "Per-pixel read-noise sigma (ADU). From dark-frame std."
+    min: 0.0
+    max: 100.0
+    step: 0.1

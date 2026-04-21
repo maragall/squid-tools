@@ -125,6 +125,11 @@ class MainWindow(QMainWindow):
             self.controller.registry.register(PhaseFromDefocusPlugin())
         except ImportError:
             pass
+        try:
+            from squid_tools.processing.acns.plugin import ACNSPlugin
+            self.controller.registry.register(ACNSPlugin())
+        except ImportError:
+            pass
 
     def _setup_menus(self) -> None:
         menu_bar = self.menuBar()
