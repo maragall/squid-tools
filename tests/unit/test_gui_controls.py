@@ -22,7 +22,8 @@ class TestControlsPanel:
         with qtbot.waitSignal(panel.borders_toggled, timeout=1000):
             panel.borders_checkbox.click()
 
-    def test_borders_default_checked(self, qtbot: QtBot) -> None:
+    def test_borders_default_unchecked(self, qtbot: QtBot) -> None:
         panel = ControlsPanel()
         qtbot.addWidget(panel)
-        assert panel.borders_checkbox.isChecked()
+        # Borders off by default — users toggle on when needed.
+        assert not panel.borders_checkbox.isChecked()

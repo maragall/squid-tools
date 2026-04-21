@@ -41,7 +41,7 @@ class StageCanvas(QObject):
 
         self._tiles: dict[int, Image] = {}      # fov_index -> Image
         self._borders: dict[int, Line] = {}      # fov_index -> Line
-        self._borders_visible = True
+        self._borders_visible = False
         self._clim: tuple[float, float] | None = None
         self._cmap: str = "grays"
 
@@ -252,7 +252,7 @@ class VispyCanvas:
         self._tiles: dict[str, Image] = {}
         self._tile_bounds: dict[str, tuple[float, float, float, float]] = {}
         self._borders: dict[str, Line] = {}
-        self._borders_visible = True
+        self._borders_visible = False
         self._global_clim: tuple[float, float] | None = None
 
     def set_global_clim(self, clim: tuple[float, float]) -> None:

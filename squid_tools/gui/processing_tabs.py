@@ -134,9 +134,10 @@ class _PluginTab(QWidget):
 
         # Toggle row
         toggle_row = QHBoxLayout()
-        self._toggle = QCheckBox(f"Enable {plugin.name} in pipeline")
+        self._toggle = QCheckBox(f"Apply {plugin.name} to viewer")
         self._toggle.setToolTip(
-            f"Enable {plugin.name}. First enable auto-triggers calibration."
+            f"Apply {plugin.name} correction to tiles shown in the viewer. "
+            "First check auto-runs calibration."
         )
         self._toggle.toggled.connect(self.toggled.emit)
         toggle_row.addWidget(self._toggle)

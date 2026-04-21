@@ -19,7 +19,7 @@ class ControlsPanel(QWidget):
         layout.addWidget(QLabel("Overlay"))
         self.borders_checkbox = QCheckBox("Show FOV Borders")
         self.borders_checkbox.setToolTip("Show/hide FOV border rectangles")
-        self.borders_checkbox.setChecked(True)
+        self.borders_checkbox.setChecked(False)
         self.borders_checkbox.toggled.connect(self.borders_toggled.emit)
         layout.addWidget(self.borders_checkbox)
 
