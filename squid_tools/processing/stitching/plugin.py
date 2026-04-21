@@ -24,15 +24,20 @@ logger = logging.getLogger(__name__)
 
 
 class StitcherParams(BaseModel):
-    """Parameters for tile stitching."""
+    """Parameters for tile stitching.
 
-    pixel_size_um: float = 0.325
-    blend_pixels: int = 32
+    Defaults ported from Cephla-Lab/stitcher tilefusion.core.TileFusion
+    (__init__ defaults). pixel_size_um is REQUIRED (no hardcoded fallback) —
+    default_params() derives it from the objective metadata.
+    """
+
+    pixel_size_um: float                      # from acquisition metadata
+    blend_pixels: int = 0                     # TileFusion default (no blend)
     do_register: bool = True
-    downsample_factor: int = 4
-    ssim_threshold: float = 0.0
-    ssim_window: int = 7
-    max_shift_pixels: int = 50
+    downsample_factor: int = 1                # TileFusion downsample_factors=(1,1)
+    ssim_threshold: float = 0.5               # TileFusion threshold=0.5
+    ssim_window: int = 15                     # TileFusion ssim_window=15
+    max_shift_pixels: int = 100               # TileFusion max_shift=(100,100)
 
 
 class StitcherPlugin(ProcessingPlugin):
@@ -302,9 +307,67 @@ class StitcherPlugin(ProcessingPlugin):
         engine.set_position_overrides(overrides)
         progress("Optimizing", 1, 1)
 
+    def fuse_region_to_array(
+        self,
+        engine,  # ViewportEngine  # noqa: ANN001
+        params: StitcherParams,
+        *,
+        channel: int = 0,
+        z: int = 0,
+        timepoint: int = 0,
+        fov_indices: set[int] | None = None,
+    ) -> np.ndarray:
+        """Fuse the given tiles into a single 2D image using position overrides.
+
+        Ports the fusion phase from Cephla-Lab/stitcher's TileFusion — the
+        missing step after run_live's registration + optimization. Returns a
+        2D float32 array sized to the stitched bounding box.
+
+        Raises RuntimeError if the engine has no active acquisition.
+        """
+        if not engine.is_loaded():
+            raise RuntimeError("Engine has no acquisition loaded")
+        indices = fov_indices if fov_indices is not None else engine.all_fov_indices()
+        if not indices:
+            raise ValueError("No FOVs to fuse")
+        sorted_ids = sorted(indices)
+
+        frames: dict[int, np.ndarray] = {}
+        positions: list[FOVPosition] = []
+        for idx in sorted_ids:
+            frames[idx] = engine.get_raw_frame(
+                idx, z=z, channel=channel, timepoint=timepoint,
+            )
+            # Honor engine's position overrides (so fusion uses REGISTERED coords)
+            pos = engine._position_overrides.get(idx)
+            if pos is None:
+                # Nominal from the spatial index
+                fov = next(
+                    f for f in engine._index._fovs if f.fov_index == idx
+                )
+                pos = (fov.x_mm, fov.y_mm)
+            positions.append(FOVPosition(
+                fov_index=idx, x_mm=pos[0], y_mm=pos[1],
+            ))
+
+        fused = self.process_region(frames, positions, params)
+        if fused is None:
+            raise RuntimeError("process_region returned None")
+        return fused
+
     def default_params(self, optical: OpticalMetadata | None = None) -> BaseModel:
-        px = optical.pixel_size_um if optical and optical.pixel_size_um else 0.325
-        return StitcherParams(pixel_size_um=px)
+        """Derive params from acquisition metadata. pixel_size_um is REQUIRED.
+
+        Raises ValueError if no acquisition-derived pixel size is available —
+        refuses to fall back to a hardcoded fiction.
+        """
+        if optical is None or not optical.pixel_size_um:
+            raise ValueError(
+                "StitcherPlugin.default_params needs OpticalMetadata.pixel_size_um "
+                "from the acquisition. Hardcoded fallbacks are off the table — "
+                "check that the acquisition reader populated .optical correctly."
+            )
+        return StitcherParams(pixel_size_um=optical.pixel_size_um)
 
     def test_cases(self) -> list[dict[str, Any]]:
         h, w = 64, 64

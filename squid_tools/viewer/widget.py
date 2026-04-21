@@ -407,7 +407,81 @@ class ViewerWidget(QWidget):
         )
         view_3d_action.triggered.connect(self._open_3d_viewer)
         menu.addAction(view_3d_action)
+        menu.addSeparator()
+        export_fused = QAction("Export Stitched Region…", self)
+        export_fused.setToolTip(
+            "Run stitching fusion on the visible region and save as OME-TIFF.",
+        )
+        export_fused.triggered.connect(self._export_stitched)
+        menu.addAction(export_fused)
         menu.exec(event.globalPos())  # type: ignore[union-attr]
+
+    def _export_stitched(self) -> None:
+        """Run stitcher fusion on the visible region and write an OME-TIFF.
+
+        Ports the fusion step from the reference `_audit/stitcher` — live
+        run_live only does registration + optimization; this is the missing
+        seam-blended export.
+        """
+        import logging
+        from pathlib import Path
+
+        import tifffile
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
+
+        from squid_tools.processing.stitching.plugin import (
+            StitcherParams,
+            StitcherPlugin,
+        )
+
+        log = logging.getLogger("squid_tools.viewer.widget")
+        if not self._engine.is_loaded():
+            return
+
+        plugin = StitcherPlugin()
+        try:
+            params = plugin.default_params(self._engine._acquisition.optical)
+            assert isinstance(params, StitcherParams)
+        except ValueError as e:
+            QMessageBox.warning(self, "Stitcher", str(e))
+            return
+
+        viewport = self._canvas.get_viewport()
+        visible = self._engine.visible_fov_indices(*viewport)
+        if len(visible) < 2:
+            QMessageBox.information(
+                self, "Export Stitched",
+                "Zoom to cover at least 2 FOVs first.",
+            )
+            return
+
+        out_path, _ = QFileDialog.getSaveFileName(
+            self, "Save stitched OME-TIFF",
+            str(self._engine._acquisition.path / "stitched.ome.tiff"),
+            "OME-TIFF (*.ome.tiff *.ome.tif);;All files (*)",
+        )
+        if not out_path:
+            return
+
+        log.info("Fusing %d visible FOVs to %s…", len(visible), out_path)
+        try:
+            fused = plugin.fuse_region_to_array(
+                self._engine, params,
+                channel=0, z=self.z_slider.value(),
+                timepoint=self.t_slider.value(),
+                fov_indices=visible,
+            )
+        except Exception as e:
+            log.exception("fusion failed")
+            QMessageBox.warning(self, "Stitcher", f"Fusion failed: {e}")
+            return
+
+        tifffile.imwrite(out_path, fused, photometric="minisblack")
+        log.info("Stitched output written: %s (%s)", out_path, fused.shape)
+        QMessageBox.information(
+            self, "Export Stitched",
+            f"Saved {Path(out_path).name}\nShape: {fused.shape}",
+        )
 
     def _open_3d_viewer(self) -> None:
         """Launch a separate 3D viewer window bound to the current engine."""

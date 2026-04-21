@@ -168,3 +168,21 @@ class Acquisition(BaseModel):
     z_stack: ZStackConfig | None = None
     time_series: TimeSeriesConfig | None = None
     regions: dict[str, Region] = {}
+
+    def model_post_init(self, _ctx) -> None:  # noqa: D401 — Pydantic hook
+        """Cross-populate optical from objective so plugins get real numbers.
+
+        Plugins call plugin.default_params(acq.optical) to derive sensible
+        defaults without hardcoded fallbacks. Squid formats expose pixel size
+        and numerical aperture on `objective`, so we mirror those into
+        `optical` if the reader didn't already set them.
+        """
+        if self.optical.pixel_size_um is None:
+            self.optical.pixel_size_um = self.objective.pixel_size_um
+        if (
+            self.optical.numerical_aperture is None
+            and self.objective.numerical_aperture is not None
+        ):
+            self.optical.numerical_aperture = self.objective.numerical_aperture
+        if self.optical.dz_um is None and self.z_stack is not None:
+            self.optical.dz_um = self.z_stack.delta_z_mm * 1000.0

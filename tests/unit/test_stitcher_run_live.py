@@ -16,7 +16,8 @@ class TestStitcherRunLive:
         engine = ViewportEngine()
         engine.load(acq_path, region="0")
         plugin = StitcherPlugin()
-        params = StitcherParams()
+        # pixel_size_um is required; derive from the loaded acquisition.
+        params = StitcherParams(pixel_size_um=engine.pixel_size_um)
 
         phases: list[str] = []
         def progress(phase, cur, total):
@@ -43,7 +44,8 @@ class TestStitcherLogging:
         engine = ViewportEngine()
         engine.load(individual_acquisition, "0")
         plugin = StitcherPlugin()
-        params = plugin.default_params(None)
+        # default_params requires OpticalMetadata now — mirror what the app does
+        params = plugin.default_params(engine._acquisition.optical)
 
         def noop_progress(phase: str, current: int, total: int) -> None:
             pass
