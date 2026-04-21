@@ -69,17 +69,22 @@ class MainWindow(QMainWindow):
 
         self.processing_tabs = ProcessingTabs(self.controller.registry)
         self.processing_tabs.toggle_changed.connect(self._on_toggle_changed)
-        self.processing_tabs.setTabPosition(QTabWidget.TabPosition.North)
+        # West-facing tabs: the labels stack vertically down the left
+        # edge, so the column needs minimal width and each tab's content
+        # uses the available column width for its params.
+        self.processing_tabs.setTabPosition(QTabWidget.TabPosition.West)
         left_layout.addWidget(self.processing_tabs, stretch=1)
 
         self.controls_panel = ControlsPanel()
         self.controls_panel.borders_toggled.connect(self._on_borders_toggled)
         left_layout.addWidget(self.controls_panel, stretch=0)
 
-        # Equal fixed widths on both side columns so the center column is
-        # geometrically centered in the window. No asymmetric padding.
-        side_col_px = 260
-        left_col.setFixedWidth(side_col_px)
+        # Equal widths on both side columns so the center column is
+        # geometrically centered. Columns are collapsible — drag the
+        # splitter handle to hide them for max viewer real estate.
+        side_col_px = 190
+        left_col.setMinimumWidth(0)
+        left_col.setMaximumWidth(side_col_px)
         middle_splitter.addWidget(left_col)
 
         # CENTER: plain container. The viewer widget itself wraps its
@@ -92,13 +97,17 @@ class MainWindow(QMainWindow):
 
         # RIGHT: region selector (wellplate / dropdown).
         self.region_selector = RegionSelector()
-        self.region_selector.setFixedWidth(side_col_px)
+        self.region_selector.setMinimumWidth(0)
+        self.region_selector.setMaximumWidth(side_col_px)
         self.region_selector.region_selected.connect(self._on_region_selected)
         middle_splitter.addWidget(self.region_selector)
 
         middle_splitter.setStretchFactor(0, 0)
         middle_splitter.setStretchFactor(1, 1)
         middle_splitter.setStretchFactor(2, 0)
+        # Allow the user to drag the side columns away entirely.
+        middle_splitter.setChildrenCollapsible(True)
+        middle_splitter.setSizes([side_col_px, 10000, side_col_px])
 
         main_layout.addWidget(middle_splitter, stretch=1)
 
