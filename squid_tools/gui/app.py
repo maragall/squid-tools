@@ -104,6 +104,10 @@ class MainWindow(QMainWindow):
         # Lazily created continuous viewer
         self._viewer = None
 
+        # Params snapshot of the in-flight plugin run, keyed by plugin name,
+        # so _on_run_complete can write to the OME sidecar.
+        self._pending_run_params: dict[str, dict] = {}
+
     def _register_default_plugins(self) -> None:
         """Register built-in processing plugins."""
         try:
@@ -313,6 +317,10 @@ class MainWindow(QMainWindow):
             sel_text = f"{len(selection)} tiles" if selection else "all FOVs"
             self.log_panel.log(f"[{plugin_name}] Run started on {sel_text}.")
             self.processing_tabs.set_status(plugin_name, "Running...")
+            # Snapshot params for the sidecar at run-complete time.
+            self._pending_run_params[plugin_name] = dict(
+                params.model_dump() if hasattr(params, "model_dump") else {},
+            )
 
     def viewer_selection(self) -> set[int]:
         """Return the current selection (empty set if no viewer)."""
@@ -333,14 +341,46 @@ class MainWindow(QMainWindow):
             plugin_name, f"Applied to {tiles_processed} tiles",
         )
         self.log_panel.log(f"[{plugin_name}] Complete.")
+        # Record in the OME sidecar manifest.
+        self._record_sidecar_run(plugin_name, tiles_processed, status="ok")
         # Refresh viewer so position overrides / pipeline changes show
         if self._viewer is not None:
             self._viewer._canvas.clear()
             self._viewer._refresh()
 
+    def _record_sidecar_run(
+        self, plugin_name: str, tiles_processed: int, *, status: str,
+    ) -> None:
+        """Append a ProcessingRun to .squid-tools/manifest.json for the acq."""
+        from squid_tools.core.sidecar import ProcessingRun
+
+        if self.controller.sidecar is None:
+            return
+        params = self._pending_run_params.pop(plugin_name, {})
+        plugin = self.controller.registry.get(plugin_name)
+        version = getattr(plugin, "version", "0") if plugin else "0"
+        try:
+            run = ProcessingRun(
+                plugin=plugin_name,
+                version=str(version),
+                params=params,
+                output_path="",
+            )
+            # Attach extra context as a param entry (stays JSON-serializable).
+            run.params.setdefault("_tiles_processed", tiles_processed)
+            run.params.setdefault("_status", status)
+            self.controller.sidecar.add_run(run)
+            self.controller.sidecar.save()
+        except Exception:
+            import logging
+            logging.getLogger("squid_tools.gui.app").exception(
+                "sidecar update failed",
+            )
+
     def _on_run_failed(self, plugin_name: str, error_message: str) -> None:
         self.processing_tabs.set_status(plugin_name, f"Failed: {error_message[:80]}")
         self.log_panel.log(f"[{plugin_name}] FAILED: {error_message}")
+        self._record_sidecar_run(plugin_name, 0, status=f"failed: {error_message[:80]}")
 
     def _auto_run_stitcher(self) -> None:
         """Auto-run the Stitcher plugin when its toggle is first enabled.

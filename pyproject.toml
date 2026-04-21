@@ -4,9 +4,12 @@ build-backend = "hatchling.build"
 
 [project]
 name = "squid-tools"
-version = "0.1.0"
+version = "1.0.0"
 description = "Post-processing connector for Cephla-Lab/Squid microscopy"
 requires-python = ">=3.10"
+# Core-only dependencies. Processing plugins pull their own algorithm deps
+# via optional extras below so users install only what they need. See
+# docs/superpowers/specs/2026-04-21-v1-dependency-management.md.
 dependencies = [
     "pydantic>=2.10",
     "numpy>=1.24",
@@ -16,13 +19,35 @@ dependencies = [
     "zarr>=2.16",
     "PySide6>=6.6",
     "vispy>=0.14",
-    "scipy>=1.10",
-    "numba>=0.59",
-    "scikit-image>=0.22",
 ]
 
 [project.optional-dependencies]
-gpu = ["cupy-cuda12x>=13.0"]
+# Processing-module extras: `pip install squid-tools[stitching,decon]`
+stitching  = ["numba>=0.59", "scikit-image>=0.22", "scipy>=1.10"]
+flatfield  = ["scipy>=1.10"]
+decon      = ["scikit-image>=0.22", "scipy>=1.10"]
+phase      = []                               # waveorder pulled lazily when used
+acns       = []                               # numpy only
+bgsub      = ["sep>=1.4"]
+
+# Remote + browser demo
+r2         = ["boto3>=1.34"]
+webdemo    = ["Pillow>=10.0"]
+
+# GPU-accelerated compositor + decon
+gpu        = ["cupy-cuda12x>=13.0"]
+
+# 3D volume viewer
+3d         = []                               # vispy is already core
+
+# Convenience bundles
+all-corrections = ["squid-tools[flatfield,acns,bgsub]"]
+all-restoration = ["squid-tools[decon,phase,acns]"]
+everything = [
+    "squid-tools[stitching,flatfield,decon,phase,acns,bgsub,r2,webdemo,3d]",
+]
+
+# Dev only
 dev = [
     "pytest>=8.0",
     "pytest-qt>=4.2",
@@ -31,8 +56,12 @@ dev = [
 ]
 
 [project.entry-points."squid_tools.plugins"]
-flatfield = "squid_tools.processing.flatfield.plugin:FlatfieldPlugin"
-stitcher = "squid_tools.processing.stitching.plugin:StitcherPlugin"
+flatfield  = "squid_tools.processing.flatfield.plugin:FlatfieldPlugin"
+stitcher   = "squid_tools.processing.stitching.plugin:StitcherPlugin"
+decon      = "squid_tools.processing.decon.plugin:DeconvolutionPlugin"
+phase      = "squid_tools.processing.phase.plugin:PhaseFromDefocusPlugin"
+acns       = "squid_tools.processing.acns.plugin:ACNSPlugin"
+bgsub      = "squid_tools.processing.bgsub.plugin:BackgroundSubtractPlugin"
 
 [tool.ruff]
 line-length = 100

@@ -32,9 +32,9 @@ class DeconvolutionParams(BaseModel):
     and tooltips captured from the source petakit GUI.
     """
 
-    wavelength_nm: float = Field(default=525.0)
-    numerical_aperture: float = Field(default=0.8)
-    pixel_size_um: float = Field(default=0.752)
+    wavelength_nm: float             # from channel metadata
+    numerical_aperture: float        # from objective metadata
+    pixel_size_um: float             # from objective metadata
     iterations: int = Field(default=15)
     psf_size_px: int = Field(default=31)
 
@@ -71,20 +71,33 @@ class DeconvolutionPlugin(ProcessingPlugin):
     def validate(self, acq: Acquisition) -> list[str]:
         warnings: list[str] = []
         if acq.objective is None or acq.objective.pixel_size_um <= 0:
-            warnings.append("Objective pixel size unknown; using default 0.752 µm.")
+            warnings.append("Objective pixel size unknown.")
+        if not acq.channels:
+            warnings.append("No channels defined.")
         return warnings
 
     def default_params(
         self, optical: OpticalMetadata | None = None,
     ) -> BaseModel:
-        if optical is None:
-            return DeconvolutionParams()
-        kwargs: dict[str, Any] = {}
-        if optical.pixel_size_um:
-            kwargs["pixel_size_um"] = optical.pixel_size_um
-        if optical.numerical_aperture:
-            kwargs["numerical_aperture"] = float(optical.numerical_aperture)
-        return DeconvolutionParams(**kwargs)
+        """Derive from metadata. No hardcoded fallbacks."""
+        if optical is None or not optical.pixel_size_um:
+            raise ValueError(
+                "Deconvolution needs pixel_size_um from acquisition metadata. "
+                "Hardcoded fallbacks removed intentionally.",
+            )
+        if not optical.numerical_aperture:
+            raise ValueError(
+                "Deconvolution needs numerical_aperture from the objective.",
+            )
+        # Default wavelength 525 nm (GFP) unless we have one from channels.
+        # This stays a default because a Deconvolution plugin operates on one
+        # channel at a time — the caller decides which wavelength to pass.
+        wavelength = 525.0
+        return DeconvolutionParams(
+            pixel_size_um=optical.pixel_size_um,
+            numerical_aperture=float(optical.numerical_aperture),
+            wavelength_nm=wavelength,
+        )
 
     def process(
         self, frame: np.ndarray, params: BaseModel,

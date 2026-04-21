@@ -35,12 +35,25 @@ class TestSigmaFromOptics:
 
 
 class TestDeconvolutionPlugin:
-    def test_params_default(self) -> None:
+    def test_default_params_requires_metadata(self) -> None:
+        import pytest
+
         plugin = DeconvolutionPlugin()
-        params = plugin.default_params(None)
+        # No optical → refuses (no hardcoded fallback)
+        with pytest.raises(ValueError, match="pixel_size_um"):
+            plugin.default_params(None)
+
+    def test_default_params_from_optical(self) -> None:
+        from squid_tools.core.data_model import OpticalMetadata
+
+        plugin = DeconvolutionPlugin()
+        params = plugin.default_params(
+            OpticalMetadata(pixel_size_um=0.752, numerical_aperture=0.8),
+        )
         assert isinstance(params, DeconvolutionParams)
         assert params.iterations == 15
         assert params.wavelength_nm == 525.0
+        assert params.pixel_size_um == 0.752
 
     def test_process_sharpens_blurred_point(self) -> None:
         plugin = DeconvolutionPlugin()
@@ -67,7 +80,9 @@ class TestDeconvolutionPlugin:
         import pytest
 
         plugin = DeconvolutionPlugin()
-        params = DeconvolutionParams()
+        params = DeconvolutionParams(
+            wavelength_nm=525.0, numerical_aperture=0.8, pixel_size_um=0.752,
+        )
         vol = np.zeros((2, 4, 4), dtype=np.float32)
         with pytest.raises(ValueError, match="2D"):
             plugin.process(vol, params)
