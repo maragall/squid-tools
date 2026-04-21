@@ -115,6 +115,11 @@ class MainWindow(QMainWindow):
             self.controller.registry.register(StitcherPlugin())
         except ImportError:
             pass
+        try:
+            from squid_tools.processing.decon.plugin import DeconvolutionPlugin
+            self.controller.registry.register(DeconvolutionPlugin())
+        except ImportError:
+            pass
 
     def _setup_menus(self) -> None:
         menu_bar = self.menuBar()

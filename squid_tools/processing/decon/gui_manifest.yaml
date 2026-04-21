@@ -1,0 +1,47 @@
+name: Deconvolution
+source_repo: https://github.com/Cephla-Lab/Deconvolution
+source_gui: src/petakit/gui/main.py
+notes: |
+  Richardson-Lucy deconvolution with a Gaussian PSF computed from
+  objective NA + channel emission wavelength. Defaults from PetaKit5D's
+  tuning for Cephla 10x / 0.752 µm pixel size, 525 nm (GFP) emission.
+  iterations=15 matches PetaKit5D's RL preset; 3D volumetric variant
+  (OMW, iterations=2) is deferred to v2 when psfmodels + CuPy are
+  bundled.
+
+parameters:
+  wavelength_nm:
+    default: 525.0
+    visible: true
+    tooltip: "Emission wavelength (nm). ~488 for GFP, 525 for GFP-derivatives."
+    min: 300.0
+    max: 900.0
+    step: 1.0
+  numerical_aperture:
+    default: 0.8
+    visible: true
+    tooltip: "Objective NA. Sets the Airy disk size."
+    min: 0.05
+    max: 1.6
+    step: 0.05
+  pixel_size_um:
+    default: 0.752
+    visible: true
+    tooltip: "Native pixel size (µm)."
+    min: 0.01
+    max: 100.0
+    step: 0.01
+  iterations:
+    default: 15
+    visible: true
+    tooltip: "Richardson-Lucy iterations. PetaKit5D RL preset uses 15."
+    min: 1
+    max: 100
+    step: 1
+  psf_size_px:
+    default: 31
+    visible: false
+    tooltip: "PSF kernel size (pixels). Power-user tuning."
+    min: 5
+    max: 127
+    step: 2
