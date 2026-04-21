@@ -389,8 +389,14 @@ class ViewportEngine:
                 for ch_idx in active_channels:
                     raw = self._get_pyramid(fov.fov_index, z, ch_idx, timepoint, level)
                     processed = raw.astype(np.float32)
-                    for transform in self._pipeline:
-                        processed = transform(processed)
+                    # Pipeline transforms (e.g. flatfield) operate on full-res
+                    # maps. At pyramid level > 0 the frame is already a
+                    # thumbnail; applying a full-res correction map here would
+                    # crash on a shape mismatch. Defer processing to level 0;
+                    # zoomed-out thumbnails show raw data.
+                    if level == 0:
+                        for transform in self._pipeline:
+                            processed = transform(processed)
                     # For level 0, apply legacy screen-resolution downsampling;
                     # for level >= 1, the pyramid frame is already smaller.
                     if level == 0 and target_tile_px < self._tile_w_px:

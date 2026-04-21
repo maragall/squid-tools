@@ -12,8 +12,8 @@ from squid_tools.processing.flatfield.plugin import FlatfieldParams, FlatfieldPl
 class TestFlatfieldPlugin:
     def test_instantiate(self) -> None:
         plugin = FlatfieldPlugin()
-        assert plugin.name == "Flatfield Correction"
-        assert plugin.category == "correction"
+        assert plugin.name == "Flatfield (BaSiC)"
+        assert plugin.category == "shading"
 
     def test_parameters(self) -> None:
         plugin = FlatfieldPlugin()

@@ -30,8 +30,8 @@ class FlatfieldParams(BaseModel):
 class FlatfieldPlugin(ProcessingPlugin):
     """Flatfield illumination correction."""
 
-    name = "Flatfield Correction"
-    category = "correction"
+    name = "Flatfield (BaSiC)"
+    category = "shading"
     requires_gpu = False
 
     def parameters(self) -> type[BaseModel]:

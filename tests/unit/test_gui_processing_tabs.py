@@ -55,7 +55,8 @@ class TestProcessingTabs:
         registry.register(DummyPlugin())
         tabs = ProcessingTabs(registry)
         qtbot.addWidget(tabs)
-        assert tabs.tab_text(0) == "TestBlur"
+        # Tab title is the umbrella label (DummyPlugin has category="correction")
+        assert tabs.tab_text(0) == "Correction"
         # Has Run button
         from PySide6.QtWidgets import QCheckBox, QPushButton
         tab = tabs.widget(0)
@@ -70,9 +71,10 @@ class TestProcessingTabs:
         with qtbot.waitSignal(tabs.toggle_changed, timeout=1000):
             tabs.set_toggle("TestBlur", True)
 
-    def test_tab_text_matches_plugin_name(self, qtbot: QtBot) -> None:
+    def test_tab_text_is_umbrella_category(self, qtbot: QtBot) -> None:
+        """DummyPlugin.category='correction' → umbrella tab label 'Correction'."""
         registry = PluginRegistry()
         registry.register(DummyPlugin())
         tabs = ProcessingTabs(registry)
         qtbot.addWidget(tabs)
-        assert tabs.tabText(0) == "TestBlur"
+        assert tabs.tabText(0) == "Correction"

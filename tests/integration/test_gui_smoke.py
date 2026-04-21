@@ -70,7 +70,7 @@ class TestPluginsRegistered:
         window = MainWindow()
         qtbot.addWidget(window)
         names = window.controller.registry.list_names()
-        assert "Flatfield Correction" in names
+        assert "Flatfield (BaSiC)" in names
 
     def test_processing_tabs_have_plugins(self, qtbot: QtBot) -> None:
         from squid_tools.gui.app import MainWindow
@@ -98,4 +98,4 @@ class TestStitcherRegistered:
             window.processing_tabs.tabText(i)
             for i in range(window.processing_tabs.count())
         ]
-        assert "Stitcher" in tab_names
+        assert "Stitching" in tab_names

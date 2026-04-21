@@ -33,8 +33,8 @@ class BackgroundSubtractParams(BaseModel):
 class BackgroundSubtractPlugin(ProcessingPlugin):
     """Per-tile background subtraction (sep.Background)."""
 
-    name: str = "Background Subtract"
-    category: str = "correction"
+    name: str = "sep.Background"
+    category: str = "background"
     requires_gpu: bool = False
 
     def parameters(self) -> type[BaseModel]:

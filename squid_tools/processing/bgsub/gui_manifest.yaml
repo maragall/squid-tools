@@ -1,4 +1,4 @@
-name: Background Subtract
+name: sep.Background
 source_repo: https://github.com/sep-developers/sep
 source_gui: null
 notes: |

@@ -56,5 +56,5 @@ class TestStitchEndToEnd:
         from squid_tools.processing.flatfield.plugin import FlatfieldPlugin
 
         ctrl.registry.register(FlatfieldPlugin())
-        result = ctrl.run_plugin("Flatfield Correction", frame.astype(np.float64))
+        result = ctrl.run_plugin("Flatfield (BaSiC)", frame.astype(np.float64))
         assert result.shape == (128, 128)

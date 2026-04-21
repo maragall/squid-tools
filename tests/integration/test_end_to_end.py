@@ -32,7 +32,7 @@ class TestEndToEnd:
         assert frame.shape == (128, 128)
 
         # Run flatfield correction
-        result = window.controller.run_plugin("Flatfield Correction", frame.astype(np.float64))
+        result = window.controller.run_plugin("Flatfield (BaSiC)", frame.astype(np.float64))
         assert result.shape == (128, 128)
 
         # Log should show status

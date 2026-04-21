@@ -41,8 +41,8 @@ class ACNSParams(BaseModel):
 class ACNSPlugin(ProcessingPlugin):
     """Per-tile analytical denoising (bias subtraction + sigma threshold)."""
 
-    name: str = "aCNS Denoise"
-    category: str = "correction"
+    name: str = "aCNS"
+    category: str = "denoising"
     requires_gpu: bool = False
 
     def parameters(self) -> type[BaseModel]:

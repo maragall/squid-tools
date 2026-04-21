@@ -36,6 +36,25 @@ class ProcessingTabs(QTabWidget):
     toggle_changed = Signal(str, bool)     # (plugin_name, is_active)
     run_requested = Signal(str, object)    # (plugin_name, params_dict)
 
+    # Category → human-readable umbrella tab label. A plugin's
+    # category attribute groups it under one of these tabs. Unknown
+    # categories fall through to category.title().
+    CATEGORY_LABELS: dict[str, str] = {
+        "shading": "Shading",
+        "denoising": "Denoising",
+        "background": "Background",
+        "deconvolution": "Deconvolution",
+        "phase": "Phase",
+        "stitching": "Stitching",
+        "correction": "Correction",
+    }
+
+    # Display order of umbrella tabs (most-used first).
+    CATEGORY_ORDER: list[str] = [
+        "shading", "denoising", "background",
+        "deconvolution", "phase", "stitching",
+    ]
+
     def __init__(
         self,
         registry: PluginRegistry,
@@ -46,17 +65,35 @@ class ProcessingTabs(QTabWidget):
         self._plugin_tabs: dict[str, _PluginTab] = {}
         self._calibrated: dict[str, bool] = {}
 
+        # Group plugins by umbrella category so the tab title is the
+        # umbrella ("Denoising") and the plugin name ("aCNS") shows
+        # inside the toggle.
+        by_cat: dict[str, list[Any]] = {}
         for plugin in registry.list_all():
-            tab = _PluginTab(plugin, self)
-            tab.toggled.connect(
-                lambda active, name=plugin.name: self._on_toggle(name, active)
-            )
-            tab.run_clicked.connect(
-                lambda name=plugin.name: self._on_run_click(name)
-            )
-            self.addTab(tab, plugin.name)
-            self._plugin_tabs[plugin.name] = tab
-            self._calibrated[plugin.name] = False
+            by_cat.setdefault(plugin.category, []).append(plugin)
+
+        ordered_cats = [c for c in self.CATEGORY_ORDER if c in by_cat]
+        ordered_cats += [c for c in by_cat if c not in self.CATEGORY_ORDER]
+
+        for cat in ordered_cats:
+            plugins = by_cat[cat]
+            label = self.CATEGORY_LABELS.get(cat, cat.title())
+            for plugin in plugins:
+                tab = _PluginTab(plugin, self)
+                tab.toggled.connect(
+                    lambda active, name=plugin.name: self._on_toggle(name, active),
+                )
+                tab.run_clicked.connect(
+                    lambda name=plugin.name: self._on_run_click(name),
+                )
+                # When multiple algorithms live under one umbrella (v2),
+                # suffix the tab with the algorithm name.
+                tab_title = (
+                    f"{label} · {plugin.name}" if len(plugins) > 1 else label
+                )
+                self.addTab(tab, tab_title)
+                self._plugin_tabs[plugin.name] = tab
+                self._calibrated[plugin.name] = False
 
     def set_toggle(self, plugin_name: str, active: bool) -> None:
         """Programmatically toggle a plugin."""

@@ -10,8 +10,8 @@ from squid_tools.processing.acns.plugin import ACNSParams, ACNSPlugin
 class TestACNSPlugin:
     def test_name_category(self) -> None:
         plugin = ACNSPlugin()
-        assert plugin.name == "aCNS Denoise"
-        assert plugin.category == "correction"
+        assert plugin.name == "aCNS"
+        assert plugin.category == "denoising"
 
     def test_default_params(self) -> None:
         params = ACNSPlugin().default_params(None)
@@ -42,5 +42,5 @@ class TestACNSPlugin:
 
         manifest = load_manifest(acns_plugin.__file__)
         assert manifest is not None
-        assert manifest.name == "aCNS Denoise"
+        assert manifest.name == "aCNS"
         assert manifest.parameters["threshold_sigma"].default == 3.0

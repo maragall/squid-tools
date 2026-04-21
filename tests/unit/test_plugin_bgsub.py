@@ -15,7 +15,8 @@ from squid_tools.processing.bgsub.plugin import (  # noqa: E402
 
 class TestBackgroundSubtractPlugin:
     def test_name(self) -> None:
-        assert BackgroundSubtractPlugin().name == "Background Subtract"
+        assert BackgroundSubtractPlugin().name == "sep.Background"
+        assert BackgroundSubtractPlugin().category == "background"
 
     def test_default_params(self) -> None:
         params = BackgroundSubtractPlugin().default_params(None)
@@ -47,5 +48,5 @@ class TestBackgroundSubtractPlugin:
 
         manifest = load_manifest(bgsub_plugin.__file__)
         assert manifest is not None
-        assert manifest.name == "Background Subtract"
+        assert manifest.name == "sep.Background"
         assert manifest.parameters["box_size"].default == 64
