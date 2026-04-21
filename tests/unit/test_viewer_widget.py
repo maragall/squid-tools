@@ -74,3 +74,40 @@ class TestViewerWidget:
         # Setting an empty pipeline should not crash
         widget.set_pipeline([])
         widget.close()
+
+
+class TestViewerWidgetAsyncRefresh:
+    def test_refresh_uses_tile_loader(self, qtbot, tmp_path: Path) -> None:
+        """After load_acquisition, _refresh dispatches via the tile loader."""
+        acq_path = create_individual_acquisition(
+            tmp_path / "acq", nx=2, ny=2, nz=1, nc=1, nt=1,
+        )
+        widget = ViewerWidget()
+        qtbot.addWidget(widget)
+        widget.load_acquisition(acq_path, region="0")
+
+        assert widget._tile_loader is not None
+        # Conftest forces synchronous mode in tests. tiles_ready still
+        # fires, just inside request() on the calling thread.
+        received = []
+        widget._tile_loader.tiles_ready.connect(
+            lambda rid, tiles: received.append(rid),
+        )
+        widget._refresh()
+        assert received, "tiles_ready should have been emitted"
+        widget.close()
+
+    def test_stale_tiles_dropped(self, qtbot, tmp_path: Path) -> None:
+        """On_tiles_ready with an old id is a no-op."""
+        acq_path = create_individual_acquisition(
+            tmp_path / "acq", nx=2, ny=2, nz=1, nc=1, nt=1,
+        )
+        widget = ViewerWidget()
+        qtbot.addWidget(widget)
+        widget.load_acquisition(acq_path, region="0")
+
+        widget._last_applied_id = 99
+        widget._on_tiles_ready(5, [])  # stale: 5 < 99
+        # Nothing crashes; _last_applied_id is unchanged
+        assert widget._last_applied_id == 99
+        widget.close()

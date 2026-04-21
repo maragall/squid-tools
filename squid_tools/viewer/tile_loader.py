@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import weakref
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -12,6 +13,20 @@ if TYPE_CHECKING:
     from squid_tools.viewer.viewport_engine import ViewportEngine
 
 logger = logging.getLogger(__name__)
+
+# Weak registry of live loaders so tests (and app shutdown) can stop
+# every outstanding worker thread without relying on widget closeEvent
+# propagating through Qt's C++ destruction cascade.
+_active_loaders: weakref.WeakSet[AsyncTileLoader] = weakref.WeakSet()
+
+
+def stop_all_loaders() -> None:
+    """Stop every live AsyncTileLoader. Used by test teardown and app exit."""
+    for loader in list(_active_loaders):
+        try:
+            loader.stop()
+        except Exception:
+            logger.exception("error stopping tile loader")
 
 
 @dataclass(frozen=True)
@@ -73,7 +88,16 @@ class _Worker(QObject):
 
 
 class AsyncTileLoader(QObject):
-    """Public API: request tiles, receive tiles_ready on the GUI thread."""
+    """Public API: request tiles, receive tiles_ready on the GUI thread.
+
+    `async_mode=True` (default) runs requests on a background QThread.
+    `async_mode=False` runs synchronously on the caller thread; used by
+    tests where Qt thread lifecycle vs. pytest GC is fragile.
+    """
+
+    # Process-wide default for async behavior. Test conftest sets this
+    # to False; production leaves it True.
+    _async_default: bool = True
 
     tiles_ready = Signal(int, object)
     request_failed = Signal(int, str)
@@ -84,24 +108,36 @@ class AsyncTileLoader(QObject):
         self,
         engine: ViewportEngine,
         parent: QObject | None = None,
+        *,
+        async_mode: bool | None = None,
     ) -> None:
         super().__init__(parent)
         self._next_id = 0
         self._stopped = False
-        self._thread = QThread()
-        self._thread.setObjectName("tile-loader")
-        self._worker = _Worker(engine)
-        self._worker.moveToThread(self._thread)
-        self._worker.tiles_ready.connect(
-            self.tiles_ready, type=Qt.ConnectionType.QueuedConnection,
+        self._engine = engine
+        self._async_mode = (
+            async_mode if async_mode is not None
+            else AsyncTileLoader._async_default
         )
-        self._worker.request_failed.connect(
-            self.request_failed, type=Qt.ConnectionType.QueuedConnection,
-        )
-        self._submit_to_worker.connect(
-            self._worker.submit, type=Qt.ConnectionType.QueuedConnection,
-        )
-        self._thread.start()
+        if self._async_mode:
+            self._thread: QThread | None = QThread()
+            self._thread.setObjectName("tile-loader")
+            self._worker: _Worker | None = _Worker(engine)
+            self._worker.moveToThread(self._thread)
+            self._worker.tiles_ready.connect(
+                self.tiles_ready, type=Qt.ConnectionType.QueuedConnection,
+            )
+            self._worker.request_failed.connect(
+                self.request_failed, type=Qt.ConnectionType.QueuedConnection,
+            )
+            self._submit_to_worker.connect(
+                self._worker.submit, type=Qt.ConnectionType.QueuedConnection,
+            )
+            self._thread.start()
+        else:
+            self._thread = None
+            self._worker = None
+        _active_loaders.add(self)
 
     def request(
         self,
@@ -126,17 +162,40 @@ class AsyncTileLoader(QObject):
             z=z,
             timepoint=timepoint,
         )
-        self._submit_to_worker.emit(req)
+        if self._async_mode:
+            self._submit_to_worker.emit(req)
+        else:
+            self._run_sync(req)
         return self._next_id
+
+    def _run_sync(self, req: TileRequest) -> None:
+        try:
+            tiles = self._engine.get_composite_tiles(
+                viewport=req.viewport,
+                screen_width=req.screen_width,
+                screen_height=req.screen_height,
+                active_channels=req.active_channels,
+                channel_names=req.channel_names,
+                channel_clims=req.channel_clims,
+                z=req.z,
+                timepoint=req.timepoint,
+            )
+        except Exception as exc:
+            logger.exception("sync tile load failed")
+            self.request_failed.emit(req.request_id, str(exc))
+            return
+        self.tiles_ready.emit(req.request_id, tiles)
 
     def stop(self) -> None:
         """Quit the worker thread. Safe to call multiple times."""
         if self._stopped:
             return
         self._stopped = True
-        try:
-            self._thread.quit()
-            self._thread.wait(2000)
-        except RuntimeError:
-            # C++ QThread object already deleted — nothing to do.
-            pass
+        if self._thread is not None:
+            try:
+                self._thread.quit()
+                self._thread.wait(2000)
+            except RuntimeError:
+                # C++ QThread object already deleted — nothing to do.
+                pass
+        _active_loaders.discard(self)

@@ -11,6 +11,29 @@ from tests.fixtures.generate_fixtures import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _sync_tile_loader():
+    """Run AsyncTileLoader synchronously in tests.
+
+    qtbot.addWidget uses a weakref so ViewerWidget can be GC'd before
+    closeEvent fires — leaving a QThread running and SIGABRT'ing when
+    Qt finalizes it. Running the loader synchronously avoids the
+    background thread entirely; production code leaves async_mode=True.
+    """
+    from squid_tools.viewer.tile_loader import (
+        AsyncTileLoader,
+        stop_all_loaders,
+    )
+
+    prev = AsyncTileLoader._async_default
+    AsyncTileLoader._async_default = False
+    try:
+        yield
+    finally:
+        AsyncTileLoader._async_default = prev
+        stop_all_loaders()
+
+
 @pytest.fixture
 def tmp_acquisition(tmp_path: Path) -> Path:
     """Return a temporary directory for creating test acquisitions."""

@@ -55,7 +55,7 @@ class TestTileRequest:
 class TestAsyncTileLoaderConstruction:
     def test_starts_worker_thread(self, qtbot: QtBot) -> None:
         engine = _FakeEngine()
-        loader = AsyncTileLoader(engine)
+        loader = AsyncTileLoader(engine, async_mode=True)
         try:
             assert loader._thread.isRunning()
         finally:
@@ -63,7 +63,7 @@ class TestAsyncTileLoaderConstruction:
 
     def test_stop_quits_thread(self, qtbot: QtBot) -> None:
         engine = _FakeEngine()
-        loader = AsyncTileLoader(engine)
+        loader = AsyncTileLoader(engine, async_mode=True)
         loader.stop()
         assert not loader._thread.isRunning()
 
@@ -85,7 +85,7 @@ class TestAsyncTileLoaderRequest:
 
     def test_request_returns_id_and_emits_tiles_ready(self, qtbot: QtBot) -> None:
         engine = _FakeEngine()
-        loader = AsyncTileLoader(engine)
+        loader = AsyncTileLoader(engine, async_mode=True)
         try:
             with qtbot.waitSignal(loader.tiles_ready, timeout=2000) as blocker:
                 request_id = loader.request(**self._request_kwargs())
@@ -99,7 +99,7 @@ class TestAsyncTileLoaderRequest:
 
     def test_request_ids_increment(self, qtbot: QtBot) -> None:
         engine = _FakeEngine()
-        loader = AsyncTileLoader(engine)
+        loader = AsyncTileLoader(engine, async_mode=True)
         try:
             id1 = loader.request(**self._request_kwargs())
             id2 = loader.request(**self._request_kwargs())
@@ -112,7 +112,7 @@ class TestAsyncTileLoaderRequest:
             def get_composite_tiles(self, **kwargs):
                 raise RuntimeError("boom")
 
-        loader = AsyncTileLoader(BrokenEngine())
+        loader = AsyncTileLoader(BrokenEngine(), async_mode=True)
         try:
             with qtbot.waitSignal(
                 loader.request_failed, timeout=2000,
@@ -142,7 +142,7 @@ class TestAsyncTileLoaderReplaceSemantics:
                 return [("tile", kwargs["viewport"], self.call_count)]
 
         engine = SlowEngine()
-        loader = AsyncTileLoader(engine)
+        loader = AsyncTileLoader(engine, async_mode=True)
         loader.tiles_ready.connect(
             lambda rid, tiles: received.append((rid, tiles)),
         )
