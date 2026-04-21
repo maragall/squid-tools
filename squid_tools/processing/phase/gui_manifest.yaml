@@ -1,0 +1,44 @@
+name: Phase from Defocus
+source_repo: https://github.com/Cephla-Lab/phase_from_defocus
+source_gui: src/phasedefocus/core.py
+notes: |
+  Quantitative phase reconstruction from a z-stack using waveorder's
+  transfer-function-based inverse solver. Defaults from the source
+  PhaseReconstructor class: illumination_na = 0.87 * objective.na
+  (determined by sweep optimization on APA102 BF LED matrix data),
+  wavelength 0.520 µm (white/green LED center), air immersion (n=1.0).
+  autotune_regularization uses waveorder's L-curve golden-section search.
+
+parameters:
+  wavelength_um:
+    default: 0.520
+    visible: true
+    tooltip: "Illumination center wavelength (µm). 0.465 = blue APA102, 0.520 = white/green."
+    min: 0.2
+    max: 1.0
+    step: 0.005
+  illumination_na_ratio:
+    default: 0.87
+    visible: true
+    tooltip: "Illumination NA = objective NA × ratio. 0.87 calibrated from BF LED matrix."
+    min: 0.1
+    max: 1.0
+    step: 0.01
+  index_of_refraction_media:
+    default: 1.0
+    visible: true
+    tooltip: "Immersion medium n. 1.0 air, 1.33 water, 1.515 oil."
+    min: 1.0
+    max: 1.7
+    step: 0.01
+  regularization_strength:
+    default: 0.0
+    visible: false
+    tooltip: "Tikhonov regularization. 0 = let autotune choose."
+    min: 0.0
+    max: 1.0
+    step: 0.001
+  autotune_regularization:
+    default: true
+    visible: false
+    tooltip: "L-curve golden-section search (waveorder)."

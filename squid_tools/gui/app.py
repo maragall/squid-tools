@@ -120,6 +120,11 @@ class MainWindow(QMainWindow):
             self.controller.registry.register(DeconvolutionPlugin())
         except ImportError:
             pass
+        try:
+            from squid_tools.processing.phase.plugin import PhaseFromDefocusPlugin
+            self.controller.registry.register(PhaseFromDefocusPlugin())
+        except ImportError:
+            pass
 
     def _setup_menus(self) -> None:
         menu_bar = self.menuBar()
