@@ -241,10 +241,13 @@ class MainWindow(QMainWindow):
         if self._viewer is not None:
             self._viewer.set_pipeline(transforms)
 
-        # Handle stitcher separately (position modification, not per-tile transform)
+        # Stitcher runs registration via its own plugin.run_live path, not
+        # via the narrower engine.register_visible_tiles (which used different
+        # pair-finding logic and reported "no pairs" on real acquisitions).
+        # Toggling Stitcher off clears any previous overrides.
         if self._viewer is not None and self.controller.acquisition is not None:
             if stitcher_active:
-                self._run_registration()
+                self._auto_run_stitcher()
             else:
                 self._viewer._engine.clear_position_overrides()
                 self._viewer._refresh()
@@ -316,28 +319,34 @@ class MainWindow(QMainWindow):
         self.processing_tabs.set_status(plugin_name, f"Failed: {error_message[:80]}")
         self.log_panel.log(f"[{plugin_name}] FAILED: {error_message}")
 
-    def _run_registration(self) -> None:
-        """Run registration on visible tiles and update positions."""
-        if self._viewer is None:
+    def _auto_run_stitcher(self) -> None:
+        """Auto-run the Stitcher plugin when its toggle is first enabled.
+
+        Uses the same AlgorithmRunner path as the Run button, so pair-finding
+        and tile shifts are identical across manual and auto invocations.
+        """
+        if self._viewer is None or self.controller.acquisition is None:
             return
-        viewport = self._viewer._canvas.get_viewport()
-        self.log_panel.log("Running registration on visible tiles...")
-
-        registered = self._viewer._engine.register_visible_tiles(
-            viewport=viewport,
-            channel=0,  # Register on first channel
+        plugin = self.controller.registry.get("Stitcher")
+        if plugin is None:
+            return
+        params_dict = self.processing_tabs.get_params("Stitcher")
+        params_cls = plugin.parameters()
+        params = (
+            params_cls(**params_dict)
+            if params_dict
+            else plugin.default_params(self.controller.acquisition.optical)
         )
-
-        if registered:
-            self._viewer._engine.set_position_overrides(registered)
-            self.log_panel.log(
-                f"Registration complete: {len(registered)} tiles repositioned"
-            )
-        else:
-            self.log_panel.log("Registration: no pairs found or registration failed")
-
-        self._viewer._canvas.clear()
-        self._viewer._refresh()
+        selection = self.viewer_selection() or None
+        ok = self._algorithm_runner.run(
+            plugin=plugin,
+            selection=selection,
+            engine=self._viewer._engine,
+            params=params,
+        )
+        if ok:
+            self.log_panel.log("[Stitcher] Auto-running after toggle...")
+            self.processing_tabs.set_status("Stitcher", "Running...")
 
 
 def main() -> None:
