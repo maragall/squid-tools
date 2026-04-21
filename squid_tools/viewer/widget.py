@@ -400,4 +400,25 @@ class ViewerWidget(QWidget):
             lambda: self._canvas.set_borders_visible(not self._canvas._borders_visible)
         )
         menu.addAction(toggle_borders)
+        menu.addSeparator()
+        view_3d_action = QAction("Open 3D View…", self)
+        view_3d_action.setToolTip(
+            "Open a ray-marched 3D view of the current FOV's z-stack.",
+        )
+        view_3d_action.triggered.connect(self._open_3d_viewer)
+        menu.addAction(view_3d_action)
         menu.exec(event.globalPos())  # type: ignore[union-attr]
+
+    def _open_3d_viewer(self) -> None:
+        """Launch a separate 3D viewer window bound to the current engine."""
+        if not self._engine.is_loaded():
+            return
+        from squid_tools.viewer.widget_3d import Viewer3DWidget
+
+        viewer = Viewer3DWidget(
+            engine=self._engine,
+            channel_names=self._channels,
+        )
+        viewer.show()
+        # Keep a reference so it isn't GC'd immediately.
+        self._viewer_3d = viewer
