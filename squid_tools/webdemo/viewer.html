@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Squid-Tools — Browser Demo</title>
+<style>
+  :root {
+    --bg: #353535;
+    --bg2: #2a2a2a;
+    --fg: #ffffff;
+    --fg-dim: #aaaaaa;
+    --accent: #2A82DA;
+    --border: #444444;
+  }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font-family: "Segoe UI", "Helvetica Neue", sans-serif; }
+  header { padding: 8px 12px; background: var(--bg2); border-bottom: 1px solid var(--border); display: flex; gap: 12px; align-items: center; }
+  header h1 { margin: 0; font-size: 14px; font-weight: 500; }
+  header .meta { color: var(--fg-dim); font-size: 12px; }
+  #status { color: var(--fg-dim); font-size: 12px; margin-left: auto; }
+  #canvas { display: block; width: 100%; height: calc(100vh - 40px); background: #000; cursor: grab; }
+  #canvas:active { cursor: grabbing; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Squid-Tools — Browser Demo</h1>
+  <span class="meta" id="meta"></span>
+  <span id="status">loading…</span>
+</header>
+<canvas id="canvas"></canvas>
+<script>
+(() => {
+  const canvas = document.getElementById("canvas");
+  const ctx = canvas.getContext("2d");
+  const status = document.getElementById("status");
+  const meta = document.getElementById("meta");
+
+  // Search string override: ?manifest=path/to/tiles.json
+  const params = new URLSearchParams(location.search);
+  const manifestUrl = params.get("manifest") || "./tiles.json";
+
+  // Viewport state: mm coordinates
+  let tiles = [];
+  let bounds = { x_min: 0, y_min: 0, x_max: 1, y_max: 1 };
+  let zoom = 1.0;
+  let pan_x = 0.0;
+  let pan_y = 0.0;
+  let loadedImages = new Map();
+
+  function resize() {
+    canvas.width = canvas.clientWidth * devicePixelRatio;
+    canvas.height = canvas.clientHeight * devicePixelRatio;
+    draw();
+  }
+  window.addEventListener("resize", resize);
+
+  function mmToPx(xMm, yMm) {
+    const w = canvas.width, h = canvas.height;
+    const bb = bounds;
+    const bx = bb.x_max - bb.x_min;
+    const by = bb.y_max - bb.y_min;
+    const fitScale = Math.min(w / bx, h / by);
+    const scale = fitScale * zoom;
+    const cx = w / 2 + pan_x;
+    const cy = h / 2 + pan_y;
+    return [
+      cx + (xMm - (bb.x_min + bx / 2)) * scale,
+      cy + (yMm - (bb.y_min + by / 2)) * scale,
+      scale,
+    ];
+  }
+
+  function draw() {
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    for (const t of tiles) {
+      const img = loadedImages.get(t.url);
+      if (!img || !img.complete) continue;
+      const [px, py, scale] = mmToPx(t.x_mm, t.y_mm);
+      ctx.drawImage(img, px, py, t.width_mm * scale, t.height_mm * scale);
+    }
+  }
+
+  function loadImage(url) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(null);
+      img.src = url;
+    });
+  }
+
+  async function init() {
+    try {
+      const res = await fetch(manifestUrl);
+      if (!res.ok) throw new Error(`manifest ${manifestUrl} → HTTP ${res.status}`);
+      const manifest = await res.json();
+      tiles = manifest.tiles || [];
+      bounds = manifest.bounds || bounds;
+      meta.textContent = `${tiles.length} tiles · ${manifest.channel || ""}`;
+      status.textContent = "loading tiles…";
+      // Prefetch all tiles (small test datasets; v2 will chunk).
+      const promises = tiles.map(async t => {
+        const img = await loadImage(t.url);
+        if (img) loadedImages.set(t.url, img);
+        draw();
+      });
+      await Promise.all(promises);
+      status.textContent = "ready";
+      draw();
+    } catch (e) {
+      status.textContent = `error: ${e.message}`;
+      console.error(e);
+    }
+  }
+
+  // Pan with mouse drag, zoom with wheel.
+  let dragging = false, lastX = 0, lastY = 0;
+  canvas.addEventListener("mousedown", e => { dragging = true; lastX = e.clientX; lastY = e.clientY; });
+  window.addEventListener("mouseup", () => { dragging = false; });
+  window.addEventListener("mousemove", e => {
+    if (!dragging) return;
+    pan_x += (e.clientX - lastX) * devicePixelRatio;
+    pan_y += (e.clientY - lastY) * devicePixelRatio;
+    lastX = e.clientX; lastY = e.clientY;
+    draw();
+  });
+  canvas.addEventListener("wheel", e => {
+    e.preventDefault();
+    const factor = Math.exp(-e.deltaY * 0.002);
+    zoom *= factor;
+    zoom = Math.max(0.05, Math.min(zoom, 200));
+    draw();
+  }, { passive: false });
+
+  resize();
+  init();
+})();
+</script>
+</body>
+</html>
