@@ -101,6 +101,47 @@ class {Name}Plugin(ProcessingPlugin):
         ...
 ```
 
+### Step 4.5: Capture the Source GUI's Parameter Manifest
+
+An algorithm's source repo usually ships a GUI (Qt, Streamlit, napari-plugin, whatever). That GUI encodes years of scientific wisdom: which parameters are sensible defaults, which are exposed to users, what tooltips explain, what min/max guard against. DO NOT discard this knowledge.
+
+Write `processing/{name}/gui_manifest.yaml` alongside `plugin.py`:
+
+```yaml
+name: {PluginName}
+source_repo: https://github.com/owner/repo
+source_gui: path/inside/source_repo/to/the_gui.py
+notes: |
+  One or two sentences on why the defaults are what they are
+  (e.g. "Defaults tuned for Cephla 10x / 0.752 µm pixel size",
+  "Downsample factor 4 was the sweet spot in the source repo's
+  stitcher_gui.py comments").
+
+parameters:
+  pixel_size_um:
+    default: 0.752
+    visible: true
+    tooltip: "Native pixel size (µm)."
+    min: 0.01
+    max: 100.0
+    step: 0.01
+  internal_tuning_constant:
+    default: 15
+    visible: false   # never shown to end users; set by the source GUI
+```
+
+Rules:
+
+1. Look at the source GUI file and for each widget backing a parameter, record:
+   - Its default value (from the widget's initial state or a constant).
+   - Its tooltip / label text (copy verbatim, don't paraphrase).
+   - Its min/max/step if the widget is bounded.
+2. If the source GUI does NOT expose a parameter but the algorithm accepts it, mark `visible: false` and include the default. Users won't see it; calls still use the right value.
+3. The `notes` field captures any context from the source repo's README, inline comments, or the gui file about why defaults were chosen. This is where to paste the tl;dr that future readers need.
+4. Don't invent parameters the source GUI doesn't have. If the source GUI exposes a parameter you don't see in your plugin's Pydantic model, that's a plugin-wrapper bug — go back to Step 4.
+
+`ProcessingTabs` auto-consumes this manifest. No GUI code to write.
+
 ### Step 5: Strip IO
 
 The algorithm must NOT read or write files. It receives numpy arrays from squid-tools' core/readers via the plugin ABC.

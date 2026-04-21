@@ -144,28 +144,54 @@ class _PluginTab(QWidget):
         toggle_row.addStretch()
         layout.addLayout(toggle_row)
 
-        # Parameter widgets
+        # Parameter widgets — consult gui_manifest.yaml if present so the
+        # absorbed algorithm's original GUI decisions (which params are
+        # exposed, with what defaults/ranges) carry over automatically.
+        manifest = self._load_manifest_for_plugin(plugin)
+        self._hidden_defaults: dict[str, object] = {}
         form = QFormLayout()
         params_cls = plugin.parameters()
         for field_name, field_info in params_cls.model_fields.items():
             annotation = field_info.annotation
             default = field_info.default
+            gui_hint = manifest.parameters.get(field_name) if manifest else None
+
+            if gui_hint is not None and gui_hint.default is not None:
+                default = gui_hint.default
+
+            # Skip (but remember) parameters the manifest hides.
+            if gui_hint is not None and not gui_hint.visible:
+                self._hidden_defaults[field_name] = default
+                continue
+
             widget: QWidget
+            tooltip = (
+                gui_hint.tooltip if gui_hint and gui_hint.tooltip
+                else (field_info.description or field_name)
+            )
 
             if annotation is float:
                 spin = QDoubleSpinBox()
-                spin.setRange(-1e6, 1e6)
+                lo = gui_hint.min if gui_hint and gui_hint.min is not None else -1e6
+                hi = gui_hint.max if gui_hint and gui_hint.max is not None else 1e6
+                spin.setRange(lo, hi)
                 spin.setDecimals(3)
+                if gui_hint and gui_hint.step is not None:
+                    spin.setSingleStep(gui_hint.step)
                 if isinstance(default, (int, float)):
                     spin.setValue(float(default))
-                spin.setToolTip(field_info.description or field_name)
+                spin.setToolTip(tooltip)
                 widget = spin
             elif annotation is int:
                 spin_int = QSpinBox()
-                spin_int.setRange(0, 100000)
+                lo_i = int(gui_hint.min) if gui_hint and gui_hint.min is not None else 0
+                hi_i = int(gui_hint.max) if gui_hint and gui_hint.max is not None else 100000
+                spin_int.setRange(lo_i, hi_i)
+                if gui_hint and gui_hint.step is not None:
+                    spin_int.setSingleStep(int(gui_hint.step))
                 if isinstance(default, int):
                     spin_int.setValue(default)
-                spin_int.setToolTip(field_info.description or field_name)
+                spin_int.setToolTip(tooltip)
                 widget = spin_int
             else:
                 continue
@@ -173,6 +199,12 @@ class _PluginTab(QWidget):
             self._param_widgets[field_name] = widget
             form.addRow(field_name, widget)
         layout.addLayout(form)
+
+        if manifest and manifest.notes:
+            notes_label = QLabel(manifest.notes)
+            notes_label.setWordWrap(True)
+            notes_label.setStyleSheet("color: #888888; font-size: 10px;")
+            layout.addWidget(notes_label)
 
         # Run button + status
         button_row = QHBoxLayout()
@@ -208,8 +240,24 @@ class _PluginTab(QWidget):
         self._run_button.click()
 
     def get_params(self) -> dict[str, Any]:
-        params: dict[str, Any] = {}
+        params: dict[str, Any] = dict(self._hidden_defaults)
         for name, widget in self._param_widgets.items():
             if isinstance(widget, (QDoubleSpinBox, QSpinBox)):
                 params[name] = widget.value()
         return params
+
+    @staticmethod
+    def _load_manifest_for_plugin(plugin: ProcessingPlugin):  # type: ignore[no-untyped-def]
+        """Look up gui_manifest.yaml next to the plugin's module file."""
+        import inspect
+
+        from squid_tools.core.gui_manifest import load_manifest
+
+        try:
+            module_file = inspect.getfile(plugin.__class__)
+        except (TypeError, OSError):
+            return None
+        try:
+            return load_manifest(module_file)
+        except Exception:
+            return None
