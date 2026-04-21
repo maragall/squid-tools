@@ -33,6 +33,37 @@ from squid_tools.gui.processing_tabs import ProcessingTabs
 from squid_tools.gui.region_selector import RegionSelector
 
 
+class _SquareContainer(QWidget):
+    """Container that centers its single child widget at the largest square
+    fitting inside its current rect.
+
+    Pure analytical geometry: on resize, side = min(W, H); child is placed
+    at ((W - side) / 2, (H - side) / 2) sized (side, side). No size
+    policies, no heightForWidth dance, no layout bloat.
+    """
+
+    def resizeEvent(self, event: object) -> None:  # noqa: N802
+        if event is not None:
+            super().resizeEvent(event)  # type: ignore[arg-type]
+        self._relayout_child()
+
+    def _relayout_child(self) -> None:
+        child = self._child()
+        if child is None:
+            return
+        w, h = self.width(), self.height()
+        side = max(0, min(w, h))
+        x = (w - side) // 2
+        y = (h - side) // 2
+        child.setGeometry(x, y, side, side)
+
+    def _child(self) -> QWidget | None:
+        for c in self.children():
+            if isinstance(c, QWidget):
+                return c
+        return None
+
+
 class MainWindow(QMainWindow):
     """Squid-Tools main window."""
 
@@ -76,19 +107,21 @@ class MainWindow(QMainWindow):
         self.controls_panel.borders_toggled.connect(self._on_borders_toggled)
         left_layout.addWidget(self.controls_panel, stretch=0)
 
-        left_col.setMinimumWidth(220)
-        left_col.setMaximumWidth(300)
+        # Equal fixed widths on both side columns so the center column is
+        # geometrically centered in the window. No asymmetric padding.
+        side_col_px = 260
+        left_col.setFixedWidth(side_col_px)
         middle_splitter.addWidget(left_col)
 
-        # CENTER: the viewer takes the entire middle column.
-        self._viewer_container = QWidget()
-        self._viewer_layout = QVBoxLayout(self._viewer_container)
-        self._viewer_layout.setContentsMargins(0, 0, 0, 0)
+        # CENTER: _SquareContainer hosts the viewer, keeping it 1:1 and
+        # centered via manual geometry (no Qt layout so we can enforce
+        # the square).
+        self._viewer_container = _SquareContainer()
         middle_splitter.addWidget(self._viewer_container)
 
         # RIGHT: region selector (wellplate / dropdown).
         self.region_selector = RegionSelector()
-        self.region_selector.setMaximumWidth(200)
+        self.region_selector.setFixedWidth(side_col_px)
         self.region_selector.region_selected.connect(self._on_region_selected)
         middle_splitter.addWidget(self.region_selector)
 
@@ -220,8 +253,11 @@ class MainWindow(QMainWindow):
         """Lazily create the continuous viewer widget."""
         try:
             from squid_tools.viewer.widget import ViewerWidget
-            self._viewer = ViewerWidget()
-            self._viewer_layout.addWidget(self._viewer)
+            self._viewer = ViewerWidget(parent=self._viewer_container)
+            # _SquareContainer positions the viewer via resizeEvent; no layout.
+            self._viewer.show()
+            # Trigger initial geometry pass so first render uses the square.
+            self._viewer_container._relayout_child()
         except Exception as e:
             self.log_panel.log(f"Viewer init failed: {e}")
 
