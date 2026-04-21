@@ -130,19 +130,33 @@ class _PluginTab(QWidget):
         self._param_widgets: dict[str, QWidget] = {}
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setSpacing(4)
 
-        # Toggle row
-        toggle_row = QHBoxLayout()
-        self._toggle = QCheckBox(f"Apply {plugin.name} to viewer")
+        # Toggle + Run + status on ONE row to keep each tab compact.
+        top_row = QHBoxLayout()
+        top_row.setSpacing(8)
+        self._toggle = QCheckBox(f"Apply {plugin.name}")
         self._toggle.setToolTip(
             f"Apply {plugin.name} correction to tiles shown in the viewer. "
             "First check auto-runs calibration."
         )
         self._toggle.toggled.connect(self.toggled.emit)
-        toggle_row.addWidget(self._toggle)
-        toggle_row.addStretch()
-        layout.addLayout(toggle_row)
+        top_row.addWidget(self._toggle)
+
+        self._run_button = QPushButton("Run")
+        self._run_button.setFixedWidth(60)
+        self._run_button.setToolTip(
+            f"Run {plugin.name}'s calibration/computation on the current "
+            "selection (or all FOVs if nothing selected).",
+        )
+        self._run_button.clicked.connect(self.run_clicked.emit)
+        top_row.addWidget(self._run_button)
+
+        self._status_label = QLabel("Not calibrated")
+        self._status_label.setStyleSheet("color: #888888; font-size: 11px;")
+        top_row.addWidget(self._status_label, stretch=1)
+        layout.addLayout(top_row)
 
         # Parameter widgets — consult gui_manifest.yaml if present so the
         # absorbed algorithm's original GUI decisions (which params are
@@ -150,6 +164,9 @@ class _PluginTab(QWidget):
         manifest = self._load_manifest_for_plugin(plugin)
         self._hidden_defaults: dict[str, object] = {}
         form = QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setHorizontalSpacing(8)
+        form.setVerticalSpacing(2)
         params_cls = plugin.parameters()
         for field_name, field_info in params_cls.model_fields.items():
             annotation = field_info.annotation
@@ -205,22 +222,6 @@ class _PluginTab(QWidget):
             notes_label.setWordWrap(True)
             notes_label.setStyleSheet("color: #888888; font-size: 10px;")
             layout.addWidget(notes_label)
-
-        # Run button + status
-        button_row = QHBoxLayout()
-        self._run_button = QPushButton("Calibrate / Compute")
-        self._run_button.setToolTip(
-            f"Run {plugin.name}'s calibration / computation on the current selection "
-            "(or all FOVs if nothing selected)."
-        )
-        self._run_button.clicked.connect(self.run_clicked.emit)
-        button_row.addWidget(self._run_button)
-        button_row.addStretch()
-        layout.addLayout(button_row)
-
-        self._status_label = QLabel("Not calibrated")
-        self._status_label.setStyleSheet("color: #aaaaaa;")
-        layout.addWidget(self._status_label)
 
         layout.addStretch()
 

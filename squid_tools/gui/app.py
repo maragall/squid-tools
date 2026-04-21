@@ -58,6 +58,7 @@ class MainWindow(QMainWindow):
         # Top: processing tabs (after plugin registration so tabs see the plugins)
         self.processing_tabs = ProcessingTabs(self.controller.registry)
         self.processing_tabs.toggle_changed.connect(self._on_toggle_changed)
+        self.processing_tabs.setMaximumHeight(170)
         main_layout.addWidget(self.processing_tabs)
 
         # Middle: controls | viewer | region selector
