@@ -130,6 +130,13 @@ class MainWindow(QMainWindow):
             self.controller.registry.register(ACNSPlugin())
         except ImportError:
             pass
+        try:
+            from squid_tools.processing.bgsub.plugin import (
+                BackgroundSubtractPlugin,
+            )
+            self.controller.registry.register(BackgroundSubtractPlugin())
+        except ImportError:
+            pass
 
     def _setup_menus(self) -> None:
         menu_bar = self.menuBar()

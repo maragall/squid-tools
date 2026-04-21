@@ -1,0 +1,24 @@
+name: Background Subtract
+source_repo: https://github.com/sep-developers/sep
+source_gui: null
+notes: |
+  Background estimation via sep.Background (Source Extractor port).
+  Defaults (bw=bh=64, fw=fh=3) are SExtractor's original astronomy
+  tuning; adequate for microscopy too. Smaller box_size tracks local
+  gradients at the cost of eating real signal.
+
+parameters:
+  box_size:
+    default: 64
+    visible: true
+    tooltip: "Mesh box size (px). Smaller = tracks finer gradients."
+    min: 8
+    max: 1024
+    step: 1
+  filter_size:
+    default: 3
+    visible: true
+    tooltip: "Median filter size on the mesh. SExtractor default is 3."
+    min: 1
+    max: 9
+    step: 1
