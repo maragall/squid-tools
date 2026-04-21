@@ -429,6 +429,46 @@ class ViewportEngine:
             return set()
         return {fov.fov_index for fov in region_obj.fovs}
 
+    def get_volume(
+        self,
+        fov: int,
+        channel: int,
+        timepoint: int = 0,
+        level: int = 0,
+    ) -> np.ndarray:
+        """Return the Z-stack for (fov, channel, timepoint) as (Z, Y, X)."""
+        if self._acquisition is None:
+            raise RuntimeError("No acquisition loaded")
+        z_stack = self._acquisition.z_stack
+        nz = z_stack.nz if z_stack else 1
+        planes = [
+            self._get_pyramid(fov, z, channel, timepoint, level)
+            for z in range(nz)
+        ]
+        return np.stack(planes, axis=0)
+
+    def all_volumes_for_region(
+        self,
+        channel: int,
+        timepoint: int = 0,
+        level: int = 0,
+    ) -> dict[int, np.ndarray]:
+        """Return {fov_index: volume} for every FOV in the current region."""
+        return {
+            fov_index: self.get_volume(fov_index, channel, timepoint, level)
+            for fov_index in sorted(self.all_fov_indices())
+        }
+
+    def voxel_size_um(self) -> tuple[float, float, float]:
+        """(vx, vy, vz) in micrometers — xy from the objective, z from z_stack."""
+        xy = self.pixel_size_um
+        if self._acquisition is None:
+            return (xy, xy, xy)
+        z_stack = self._acquisition.z_stack
+        if z_stack is None or z_stack.nz <= 1:
+            return (xy, xy, xy)
+        return (xy, xy, z_stack.delta_z_mm * 1000.0)
+
     def visible_fov_indices(
         self, x_min: float, y_min: float, x_max: float, y_max: float,
     ) -> set[int]:

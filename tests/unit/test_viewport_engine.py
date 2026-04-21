@@ -311,3 +311,75 @@ class TestViewportEngineCompositeWithPyramid:
             z=0, timepoint=0,
         )
         assert any(k[4] >= 1 for k in engine._pyramid_cache)
+
+
+class TestViewportEngineGetVolume:
+    def test_get_volume_shape_z_y_x(self, individual_acquisition) -> None:
+        import numpy as np
+
+        from squid_tools.viewer.viewport_engine import ViewportEngine
+
+        engine = ViewportEngine()
+        engine.load(individual_acquisition, "0")
+        vol = engine.get_volume(fov=0, channel=0, timepoint=0)
+        assert vol.ndim == 3
+        nz = engine._acquisition.z_stack.nz if engine._acquisition.z_stack else 1
+        assert vol.shape[0] == nz
+        # First plane matches the raw single-plane read
+        raw0 = engine._load_raw(fov=0, z=0, channel=0, timepoint=0)
+        assert np.array_equal(vol[0], raw0)
+
+    def test_get_volume_with_pyramid_level(self, individual_acquisition) -> None:
+        from squid_tools.viewer.viewport_engine import ViewportEngine
+
+        engine = ViewportEngine()
+        engine.load(individual_acquisition, "0")
+        vol0 = engine.get_volume(fov=0, channel=0, timepoint=0, level=0)
+        vol1 = engine.get_volume(fov=0, channel=0, timepoint=0, level=1)
+        assert vol1.shape[0] == vol0.shape[0]
+        assert vol1.shape[1] == vol0.shape[1] // 2
+        assert vol1.shape[2] == vol0.shape[2] // 2
+
+    def test_get_volume_no_acquisition_raises(self) -> None:
+        import pytest
+
+        from squid_tools.viewer.viewport_engine import ViewportEngine
+
+        engine = ViewportEngine()
+        with pytest.raises(RuntimeError, match="No acquisition"):
+            engine.get_volume(fov=0, channel=0, timepoint=0)
+
+    def test_all_volumes_for_region(self, individual_acquisition) -> None:
+        from squid_tools.viewer.viewport_engine import ViewportEngine
+
+        engine = ViewportEngine()
+        engine.load(individual_acquisition, "0")
+        volumes = engine.all_volumes_for_region(channel=0, timepoint=0)
+        assert set(volumes.keys()) == engine.all_fov_indices()
+        for v in volumes.values():
+            assert v.ndim == 3
+
+
+class TestViewportEngineVoxelSize:
+    def test_voxel_size_with_z_stack(self, individual_acquisition) -> None:
+        from squid_tools.viewer.viewport_engine import ViewportEngine
+
+        engine = ViewportEngine()
+        engine.load(individual_acquisition, "0")
+        vx, vy, vz = engine.voxel_size_um()
+        assert vx > 0 and vy > 0 and vz > 0
+        assert vx == vy  # square pixels
+        # With a multi-plane z-stack, vz is delta_z in microns
+        if (
+            engine._acquisition.z_stack is not None
+            and engine._acquisition.z_stack.nz > 1
+        ):
+            expected = engine._acquisition.z_stack.delta_z_mm * 1000.0
+            assert vz == expected
+
+    def test_voxel_size_no_acquisition(self) -> None:
+        from squid_tools.viewer.viewport_engine import ViewportEngine
+
+        engine = ViewportEngine()
+        vx, vy, vz = engine.voxel_size_um()
+        assert (vx, vy, vz) == (vx, vy, vz)  # doesn't crash
