@@ -49,9 +49,15 @@ class ViewerWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
+        # The vispy canvas is wrapped in a SquareContainer so it stays 1:1
+        # and centered. Sliders and nav rows live OUTSIDE that square.
+        from squid_tools.viewer.square_container import SquareContainer
+
         native = self._canvas.native_widget()
+        self._canvas_square = SquareContainer(self)
         if native is not None:
-            layout.addWidget(native, stretch=1)  # type: ignore[arg-type]
+            self._canvas_square.setCentralWidget(native)  # type: ignore[arg-type]
+        layout.addWidget(self._canvas_square, stretch=1)
 
         # Channel controls (one row per channel: checkbox + min/max sliders).
         # Built in load_acquisition when channels are known.
