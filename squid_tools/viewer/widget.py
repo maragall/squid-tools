@@ -204,6 +204,10 @@ class ViewerWidget(QWidget):
         self._channel_reset_buttons.clear()
         self._channel_data_ranges.clear()
 
+        # One row per channel. Drop the separate value label (tooltip on
+        # the "auto" button carries the numeric clim). Sliders share a
+        # stretching column so the row reads as: [chk] [min ═══] [max ═══] [auto]
+        slider_height = 14
         for i, name in enumerate(self._channels):
             short = name
             for pattern in ("405", "488", "561", "638", "730"):
@@ -214,7 +218,7 @@ class ViewerWidget(QWidget):
             color = get_channel_hex(name)
             cb = QCheckBox(short)
             cb.setChecked(True)
-            cb.setFixedWidth(70)
+            cb.setFixedWidth(64)
             cb.setToolTip(f"Show/hide {name} in composite")
             cb.setStyleSheet(f"QCheckBox {{ color: {color}; font-weight: 500; }}")
             cb.toggled.connect(self._on_channel_toggled)
@@ -223,6 +227,7 @@ class ViewerWidget(QWidget):
             min_slider = QSlider(Qt.Orientation.Horizontal)
             min_slider.setRange(0, 10000)
             min_slider.setValue(0)
+            min_slider.setFixedHeight(slider_height)
             min_slider.setToolTip(f"{name}: contrast min")
             min_slider.valueChanged.connect(self._on_contrast_changed)
             self._channel_grid.addWidget(min_slider, i, 1)
@@ -230,18 +235,18 @@ class ViewerWidget(QWidget):
             max_slider = QSlider(Qt.Orientation.Horizontal)
             max_slider.setRange(0, 10000)
             max_slider.setValue(10000)
+            max_slider.setFixedHeight(slider_height)
             max_slider.setToolTip(f"{name}: contrast max")
             max_slider.valueChanged.connect(self._on_contrast_changed)
             self._channel_grid.addWidget(max_slider, i, 2)
 
-            value_label = QLabel("auto")
-            value_label.setFixedWidth(100)
-            value_label.setStyleSheet("QLabel { color: #888888; font-size: 10px; }")
-            self._channel_grid.addWidget(value_label, i, 3)
+            value_label = QLabel("")  # kept for API compat; kept empty
+            self._channel_grid.addWidget(value_label, i, 3)  # zero-width col
 
             reset_btn = QPushButton("auto")
-            reset_btn.setFixedWidth(48)
-            reset_btn.setToolTip(f"Recompute auto-contrast for {name}")
+            reset_btn.setFixedWidth(40)
+            reset_btn.setFixedHeight(slider_height + 4)
+            reset_btn.setToolTip(f"Reset auto-contrast for {name}")
             reset_btn.clicked.connect(lambda _=False, idx=i: self._reset_channel_contrast(idx))
             self._channel_grid.addWidget(reset_btn, i, 4)
 

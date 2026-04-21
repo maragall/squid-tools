@@ -364,6 +364,11 @@ class ViewportEngine:
             else self._pick_level(viewport, screen_width, screen_height)
         )
 
+        # When the user toggles every channel off, there's nothing to render.
+        # Return an empty tile list rather than crashing in the compositor.
+        if not active_channels:
+            return []
+
         x_min, y_min, x_max, y_max = viewport
         visible_fovs = self._index.query(x_min, y_min, x_max, y_max)
 

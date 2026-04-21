@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QMainWindow,
     QSplitter,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -55,26 +56,37 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # Top: processing tabs (after plugin registration so tabs see the plugins)
-        self.processing_tabs = ProcessingTabs(self.controller.registry)
-        self.processing_tabs.toggle_changed.connect(self._on_toggle_changed)
-        self.processing_tabs.setMaximumHeight(170)
-        main_layout.addWidget(self.processing_tabs)
-
-        # Middle: controls | viewer | region selector
+        # Layout: [ left: processing + controls | viewer | right: regions ]
+        # Viewer stretches full-height between the log panel and the window
+        # top so the canvas is as square as possible.
         middle_splitter = QSplitter(Qt.Horizontal)
 
-        self.controls_panel = ControlsPanel()
-        self.controls_panel.setMaximumWidth(150)
-        self.controls_panel.borders_toggled.connect(self._on_borders_toggled)
-        middle_splitter.addWidget(self.controls_panel)
+        # LEFT column: processing tabs stacked over the overlay controls.
+        left_col = QWidget()
+        left_layout = QVBoxLayout(left_col)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(0)
 
-        # Viewer placeholder (replaced when acquisition is opened)
+        self.processing_tabs = ProcessingTabs(self.controller.registry)
+        self.processing_tabs.toggle_changed.connect(self._on_toggle_changed)
+        self.processing_tabs.setTabPosition(QTabWidget.TabPosition.North)
+        left_layout.addWidget(self.processing_tabs, stretch=1)
+
+        self.controls_panel = ControlsPanel()
+        self.controls_panel.borders_toggled.connect(self._on_borders_toggled)
+        left_layout.addWidget(self.controls_panel, stretch=0)
+
+        left_col.setMinimumWidth(220)
+        left_col.setMaximumWidth(300)
+        middle_splitter.addWidget(left_col)
+
+        # CENTER: the viewer takes the entire middle column.
         self._viewer_container = QWidget()
         self._viewer_layout = QVBoxLayout(self._viewer_container)
         self._viewer_layout.setContentsMargins(0, 0, 0, 0)
         middle_splitter.addWidget(self._viewer_container)
 
+        # RIGHT: region selector (wellplate / dropdown).
         self.region_selector = RegionSelector()
         self.region_selector.setMaximumWidth(200)
         self.region_selector.region_selected.connect(self._on_region_selected)
