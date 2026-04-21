@@ -9,6 +9,7 @@ from squid_tools.viewer.compositor import (
     DEFAULT_BACKEND,
     Backend,
     composite_channels,
+    composite_volume_channels,
 )
 
 
@@ -187,3 +188,73 @@ class TestCompositorIntegrationWithEngine:
         assert data.ndim == 3
         assert data.shape[-1] == 3
         assert data.dtype == np.float32
+
+
+class TestCompositeVolumeChannels:
+    def test_single_channel_rgb_plus_alpha(self) -> None:
+        vol = np.ones((4, 8, 8), dtype=np.float32)
+        out = composite_volume_channels(
+            [vol], [(0.0, 1.0)], [(1.0, 0.0, 0.0)],
+        )
+        assert out.shape == (4, 8, 8, 4)
+        assert out.dtype == np.float32
+        assert np.allclose(out[..., 0], 1.0)
+        assert np.allclose(out[..., 1:3], 0.0)
+        # Alpha equals normalized value
+        assert np.allclose(out[..., 3], 1.0)
+
+    def test_two_channels_alpha_is_max(self) -> None:
+        red_vol = np.ones((2, 4, 4), dtype=np.float32)
+        green_vol = np.full((2, 4, 4), 0.5, dtype=np.float32)
+        out = composite_volume_channels(
+            [red_vol, green_vol],
+            [(0.0, 1.0), (0.0, 1.0)],
+            [(1.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
+        )
+        # Alpha is max across channels — red is brighter (1.0) vs green (0.5)
+        assert np.allclose(out[..., 3], 1.0)
+
+    def test_zero_signal_has_zero_alpha(self) -> None:
+        vol = np.zeros((2, 4, 4), dtype=np.float32)
+        out = composite_volume_channels(
+            [vol], [(0.0, 1.0)], [(1.0, 1.0, 1.0)],
+        )
+        assert np.allclose(out[..., 3], 0.0)
+        assert np.allclose(out[..., :3], 0.0)
+
+    def test_clim_normalization_3d(self) -> None:
+        vol = np.full((2, 4, 4), 1000.0, dtype=np.float32)
+        out = composite_volume_channels(
+            [vol], [(500.0, 1500.0)], [(1.0, 0.0, 0.0)],
+        )
+        assert np.allclose(out[..., 0], 0.5)
+        assert np.allclose(out[..., 3], 0.5)
+
+    def test_empty_raises(self) -> None:
+        with pytest.raises(ValueError, match="at least one channel"):
+            composite_volume_channels([], [], [])
+
+    def test_length_mismatch_raises(self) -> None:
+        vol = np.zeros((2, 4, 4), dtype=np.float32)
+        with pytest.raises(ValueError, match="same length"):
+            composite_volume_channels(
+                [vol, vol], [(0.0, 1.0)],
+                [(1.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
+            )
+
+    def test_non_3d_raises(self) -> None:
+        vol2d = np.zeros((4, 4), dtype=np.float32)
+        with pytest.raises(ValueError, match="must be 3D"):
+            composite_volume_channels(
+                [vol2d], [(0.0, 1.0)], [(1.0, 0.0, 0.0)],
+            )
+
+    def test_mismatched_shape_raises(self) -> None:
+        a = np.zeros((2, 4, 4), dtype=np.float32)
+        b = np.zeros((2, 5, 4), dtype=np.float32)
+        with pytest.raises(ValueError, match="same shape"):
+            composite_volume_channels(
+                [a, b],
+                [(0.0, 1.0), (0.0, 1.0)],
+                [(1.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
+            )

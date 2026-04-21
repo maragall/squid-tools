@@ -105,3 +105,47 @@ def _composite_cupy(
         out += normed[..., None] * color_arr
     out = cp.clip(out, 0.0, 1.0)
     return cp.asnumpy(out).astype(np.float32)
+
+
+def composite_volume_channels(
+    volumes: Sequence[np.ndarray],
+    clims: Sequence[tuple[float, float]],
+    colors_rgb: Sequence[tuple[float, float, float]],
+    backend: Backend | None = None,
+) -> np.ndarray:
+    """Composite N 3D grayscale volumes into (Z, Y, X, 4) float32 RGBA.
+
+    RGB: sum of color * normalized contributions, clipped to [0, 1].
+    Alpha: per-voxel max of normalized values across channels, so
+    voxels with no signal stay transparent in ray-marched rendering.
+
+    The `backend` parameter is reserved; this cycle is numpy-only.
+    """
+    if not (len(volumes) == len(clims) == len(colors_rgb)):
+        raise ValueError("volumes, clims, colors_rgb must be same length")
+    if len(volumes) == 0:
+        raise ValueError("at least one channel required")
+    for v in volumes:
+        if v.ndim != 3:
+            raise ValueError(f"volumes must be 3D (Z,Y,X), got {v.ndim}D")
+    shape = volumes[0].shape
+    for v in volumes[1:]:
+        if v.shape != shape:
+            raise ValueError("all volumes must have the same shape")
+
+    z, h, w = shape
+    rgb = np.zeros((z, h, w, 3), dtype=np.float32)
+    alpha = np.zeros((z, h, w), dtype=np.float32)
+    for volume, (lo, hi), color in zip(volumes, clims, colors_rgb, strict=True):
+        denom = max(hi - lo, 1e-6)
+        normed = np.clip((volume.astype(np.float32) - lo) / denom, 0.0, 1.0)
+        rgb += normed[..., None] * np.asarray(color, dtype=np.float32)
+        np.maximum(alpha, normed, out=alpha)
+    np.clip(rgb, 0.0, 1.0, out=rgb)
+    out = np.empty((z, h, w, 4), dtype=np.float32)
+    out[..., :3] = rgb
+    out[..., 3] = alpha
+    logger.info(
+        "volume composited: %s from %d channels", out.shape, len(volumes),
+    )
+    return out
