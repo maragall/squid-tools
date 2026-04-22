@@ -51,6 +51,14 @@ def main() -> None:
     app = QApplication(sys.argv)
     from squid_tools.gui.style import apply_style  # noqa: PLC0415
     apply_style(app)
+
+    # Stop every live AsyncTileLoader before Qt starts tearing down widgets,
+    # so the QThread destructor never fires mid-run. Prevents SIGABRT on
+    # window close ("QThread: Destroyed while thread 'tile-loader' is still
+    # running").
+    from squid_tools.viewer.tile_loader import stop_all_loaders  # noqa: PLC0415
+    app.aboutToQuit.connect(stop_all_loaders)
+
     window = MainWindow()
 
     if args.path:
