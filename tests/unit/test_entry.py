@@ -48,7 +48,7 @@ class TestLoggerWiring:
                 return None
 
         class FakeApp:
-            aboutToQuit = FakeSignal()
+            aboutToQuit = FakeSignal()  # noqa: N815 — Qt signal naming
 
             def __init__(self, *a, **kw):
                 calls.append("QApplication")

@@ -224,6 +224,7 @@ class StitcherPlugin(ProcessingPlugin):
             two_round_optimization,
         )
         from squid_tools.processing.stitching.registration import (
+            compute_pair_bounds,
             find_adjacent_pairs,
             register_pair_worker,
         )
@@ -252,22 +253,35 @@ class StitcherPlugin(ProcessingPlugin):
         if not pairs:
             return
 
+        # Compute per-pair overlap bounds so we register on just the overlap
+        # strip, not the whole tile. This mirrors the reference stitcher
+        # (_audit/stitcher/src/tilefusion/core.py:595-603, 660-672):
+        # phase cross-correlation needs the shared region, not the full frame.
+        pair_bounds = compute_pair_bounds(pairs, tile_shape)
+
         # Phase 2: Register progressively
-        total = len(pairs)
+        total = len(pair_bounds)
         logger.info("Stitcher: pairwise registration on %d tiles", len(sorted_ids))
         pairwise_metrics: dict[tuple[int, int], tuple[int, int, float]] = {}
 
-        for k, (i_pos, j_pos, _dy, _dx, _ov_y, _ov_x) in enumerate(pairs):
+        for k, bounds in enumerate(pair_bounds):
             progress("Registering", k, total)
+            (
+                i_pos, j_pos,
+                (by_i_0, by_i_1), (bx_i_0, bx_i_1),
+                (by_j_0, by_j_1), (bx_j_0, bx_j_1),
+            ) = bounds
             frame_i = engine.get_raw_frame(
                 sorted_ids[i_pos], z=0, channel=0, timepoint=0,
             ).astype("float32")
             frame_j = engine.get_raw_frame(
                 sorted_ids[j_pos], z=0, channel=0, timepoint=0,
             ).astype("float32")
+            patch_i = frame_i[by_i_0:by_i_1, bx_i_0:bx_i_1]
+            patch_j = frame_j[by_j_0:by_j_1, bx_j_0:bx_j_1]
             df = (params.downsample_factor, params.downsample_factor)
             result = register_pair_worker((
-                i_pos, j_pos, frame_i, frame_j, df,
+                i_pos, j_pos, patch_i, patch_j, df,
                 params.ssim_window, params.ssim_threshold,
                 (params.max_shift_pixels, params.max_shift_pixels),
             ))
