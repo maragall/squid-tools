@@ -210,9 +210,11 @@ class ViewerWidget(QWidget):
         self._channel_reset_buttons.clear()
         self._channel_data_ranges.clear()
 
-        # One row per channel. Drop the separate value label (tooltip on
-        # the "auto" button carries the numeric clim). Sliders share a
-        # stretching column so the row reads as: [chk] [min ═══] [max ═══] [auto]
+        # ONE slider per channel = the upper contrast limit. Lower stays at
+        # the auto-detected p1 set by _apply_auto_contrast_to_channel().
+        # Layout per row: [☐ wavelength] [contrast slider] [auto reset]
+        # Min sliders are kept as hidden objects so the rest of the
+        # contrast pipeline (which reads min+max ticks) keeps working.
         slider_height = 14
         for i, name in enumerate(self._channels):
             short = name
@@ -230,31 +232,30 @@ class ViewerWidget(QWidget):
             cb.toggled.connect(self._on_channel_toggled)
             self._channel_grid.addWidget(cb, i, 0)
 
+            # Hidden min slider (not added to the grid). _on_contrast_changed
+            # still reads its tick value as the lower clim.
             min_slider = QSlider(Qt.Orientation.Horizontal)
             min_slider.setRange(0, 10000)
             min_slider.setValue(0)
-            min_slider.setFixedHeight(slider_height)
-            min_slider.setToolTip(f"{name}: contrast min")
-            min_slider.valueChanged.connect(self._on_contrast_changed)
-            self._channel_grid.addWidget(min_slider, i, 1)
+            min_slider.hide()
 
             max_slider = QSlider(Qt.Orientation.Horizontal)
             max_slider.setRange(0, 10000)
             max_slider.setValue(10000)
             max_slider.setFixedHeight(slider_height)
-            max_slider.setToolTip(f"{name}: contrast max")
+            max_slider.setToolTip(f"{name}: brightness / contrast")
             max_slider.valueChanged.connect(self._on_contrast_changed)
-            self._channel_grid.addWidget(max_slider, i, 2)
+            self._channel_grid.addWidget(max_slider, i, 1)
 
-            value_label = QLabel("")  # kept for API compat; kept empty
-            self._channel_grid.addWidget(value_label, i, 3)  # zero-width col
+            value_label = QLabel("")
+            self._channel_grid.addWidget(value_label, i, 2)
 
             reset_btn = QPushButton("auto")
             reset_btn.setFixedWidth(40)
             reset_btn.setFixedHeight(slider_height + 4)
             reset_btn.setToolTip(f"Reset auto-contrast for {name}")
             reset_btn.clicked.connect(lambda _=False, idx=i: self._reset_channel_contrast(idx))
-            self._channel_grid.addWidget(reset_btn, i, 4)
+            self._channel_grid.addWidget(reset_btn, i, 3)
 
             self._channel_checkboxes.append(cb)
             self._channel_min_sliders.append(min_slider)

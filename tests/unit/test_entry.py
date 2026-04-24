@@ -43,13 +43,7 @@ class TestLoggerWiring:
             calls.append("setup_logging")
             return tmp_path
 
-        class FakeSignal:
-            def connect(self, _slot):
-                return None
-
         class FakeApp:
-            aboutToQuit = FakeSignal()  # noqa: N815 — Qt signal naming
-
             def __init__(self, *a, **kw):
                 calls.append("QApplication")
             def exec(self):
