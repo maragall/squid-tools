@@ -60,6 +60,9 @@ class ViewportEngine:
         self._last_screen_key: str = ""
         self._pipeline: list = []
         self._contrast: tuple[float, float] | None = None
+        # Per-channel real data max from the most recent compute_contrast,
+        # used by ViewerWidget to size the contrast slider's upper bound.
+        self._last_sampled_max: dict[int, float] = {}
         self._position_overrides: dict[int, tuple[float, float]] = {}
 
     def load(self, path: Path, region: str) -> None:
@@ -272,6 +275,9 @@ class ViewportEngine:
         if p1 == p99:
             p99 = p1 + 1
         self._contrast = (p1, p99)
+        # Record the actual sampled maximum so the widget can size its
+        # contrast slider to real data instead of the 2×p99 heuristic.
+        self._last_sampled_max[channel] = float(all_px.max())
         return (p1, p99)
 
     def get_tiles(

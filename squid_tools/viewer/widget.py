@@ -40,6 +40,9 @@ class ViewerWidget(QWidget):
         self._tile_loader: AsyncTileLoader | None = None
         self._last_applied_id: int = 0
         self._updating_sliders: bool = False
+        # Channel indices where the user has touched the contrast slider.
+        # Auto-recompute skips these; "auto" button re-adds them.
+        self._user_tuned_channels: set[int] = set()
 
         self.selection = SelectionState(self)
         self._canvas.selection_drawn.connect(self._on_selection_drawn)
@@ -115,6 +118,13 @@ class ViewerWidget(QWidget):
         self._refresh_timer.setSingleShot(True)
         self._refresh_timer.setInterval(50)  # 50ms debounce
         self._refresh_timer.timeout.connect(self._refresh)
+
+        # Slower debounce: re-sample auto-contrast on channels the user
+        # hasn't manually tuned, so panning to a brighter region adapts.
+        self._autocontrast_timer = QTimer(self)
+        self._autocontrast_timer.setSingleShot(True)
+        self._autocontrast_timer.setInterval(500)  # 500ms: only after pan settles
+        self._autocontrast_timer.timeout.connect(self._recompute_auto_contrast)
 
         # Connect to canvas draw event for viewport-driven loading
         self._canvas.connect_draw(self._on_draw)
@@ -274,7 +284,11 @@ class ViewerWidget(QWidget):
         self._refresh()
 
     def _on_contrast_changed(self) -> None:
-        """One of the contrast sliders moved. Recompute clims + refresh."""
+        """One of the contrast sliders moved. Recompute clims + refresh.
+
+        Also marks the touched channel as user-tuned so viewport-change
+        auto-recompute leaves it alone.
+        """
         if self._updating_sliders:
             return
         for i in range(len(self._channels)):
@@ -293,6 +307,7 @@ class ViewerWidget(QWidget):
             self._channel_value_labels[i].setText(
                 f"{clim_lo:.0f}..{clim_hi:.0f}",
             )
+            self._user_tuned_channels.add(i)
         self._engine._display_cache.clear()
         self._refresh()
 
@@ -308,15 +323,50 @@ class ViewerWidget(QWidget):
             fov_indices=fov_indices,
         )
         self._apply_auto_contrast_to_channel(channel, p1, p99)
+        # Re-opt this channel into viewport-follow auto-contrast.
+        self._user_tuned_channels.discard(channel)
         self._engine._display_cache.clear()
         self._refresh()
+
+    def _recompute_auto_contrast(self) -> None:
+        """Re-sample p1/p99 for every non-user-tuned channel from the
+        current viewport. Triggered after pan/zoom settles (500 ms).
+        """
+        if not self._engine.is_loaded():
+            return
+        viewport = self._canvas.get_viewport()
+        visible = self._engine._index.query(*viewport) if self._engine._index else []
+        if not visible:
+            return
+        fov_indices = [f.fov_index for f in visible]
+        changed = False
+        for ch_idx in self._active_channels:
+            if ch_idx in self._user_tuned_channels:
+                continue
+            p1, p99 = self._engine.compute_contrast(
+                channel=ch_idx,
+                z=self.z_slider.value(),
+                timepoint=self.t_slider.value(),
+                fov_indices=fov_indices,
+            )
+            self._apply_auto_contrast_to_channel(ch_idx, p1, p99)
+            changed = True
+        if changed:
+            self._engine._display_cache.clear()
+            self._refresh()
 
     def _apply_auto_contrast_to_channel(
         self, channel: int, clim_lo: float, clim_hi: float,
     ) -> None:
         """Update one channel's data range + slider positions + clim."""
         data_lo = min(clim_lo, 0.0) if clim_lo < 0 else 0.0
-        data_hi = max(clim_hi * 2.0, clim_hi + 1.0)
+        # Use the engine's sampled actual max so the slider covers the real
+        # range instead of the old 2×p99 heuristic. Fall back if unavailable.
+        sampled = self._engine._last_sampled_max.get(channel)
+        if sampled is not None and sampled > clim_hi:
+            data_hi = float(sampled)
+        else:
+            data_hi = max(clim_hi * 2.0, clim_hi + 1.0)
         self._channel_data_ranges[channel] = (data_lo, data_hi)
         span = max(data_hi - data_lo, 1e-6)
         lo_tick = int(max(0, min(10000, (clim_lo - data_lo) / span * 10000)))
@@ -338,8 +388,11 @@ class ViewerWidget(QWidget):
         self._canvas.set_borders_visible(visible)
 
     def _on_draw(self, event: object) -> None:
-        """Canvas was drawn (after pan/zoom). Schedule a refresh."""
+        """Canvas was drawn (after pan/zoom). Schedule a refresh + the
+        slower auto-contrast re-sample so contrast follows the viewport
+        when the user pans to a different brightness region."""
         self._refresh_timer.start()
+        self._autocontrast_timer.start()
 
     def _on_slider_changed(self) -> None:
         """Z or T slider moved. Refresh composite. Preserve user clims."""
