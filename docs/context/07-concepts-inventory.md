@@ -88,8 +88,15 @@ lots of stuff" — this page is the scan surface.
 - **Per-pixel dark-frame calibration** (v2) — replaces aCNS scalar
   params with calibration maps.
 
-## E. Absorption loop
+## E. Absorption loop + dev environment
 
+- **Squid-Tools is the development environment for absorbed
+  algorithms** — once a repo is absorbed, its upstream is a frozen
+  reference (in `_audit/`) and the active development of that
+  algorithm happens inside `squid_tools/processing/<name>/`. No
+  round-tripping. The absorber + dev mode together make the loop:
+  pull repo into `_audit/`, run absorber, iterate inside the plugin
+  using `--dev` against real data.
 - **Algorithm Absorber skill** — 9-step protocol at
   `.claude/skills/cephla-algorithm-absorber.md`.
 - **gui_manifest.yaml** — per-plugin GUI parameter manifest
