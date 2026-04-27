@@ -28,35 +28,6 @@ def _to_float32(data: np.ndarray) -> np.ndarray:
     return data.astype(np.float32)
 
 
-_ALPHA_CACHE: dict[tuple[int, int], np.ndarray] = {}
-
-
-def _add_edge_alpha(rgb: np.ndarray) -> np.ndarray:
-    """Stack a Hann-tapered alpha channel onto an (H, W, 3) RGB tile.
-
-    Taper width = ~6.25% of the smaller axis. Tiles that don't overlap
-    have a soft edge but interior alpha = 1.0. Where two tiles overlap
-    on the canvas (e.g. after stitcher repositions them), the GPU blends
-    the tapered edges instead of showing hard rectangular seams.
-    """
-    h, w = rgb.shape[:2]
-    cached = _ALPHA_CACHE.get((h, w))
-    if cached is None:
-        taper = max(1, min(h, w) // 16)
-        ramp_y = np.ones(h, dtype=np.float32)
-        ramp_y[:taper] = np.linspace(0.0, 1.0, taper, dtype=np.float32)
-        ramp_y[-taper:] = np.linspace(1.0, 0.0, taper, dtype=np.float32)
-        ramp_x = np.ones(w, dtype=np.float32)
-        ramp_x[:taper] = np.linspace(0.0, 1.0, taper, dtype=np.float32)
-        ramp_x[-taper:] = np.linspace(1.0, 0.0, taper, dtype=np.float32)
-        cached = np.outer(ramp_y, ramp_x)
-        _ALPHA_CACHE[(h, w)] = cached
-    out = np.empty((h, w, 4), dtype=np.float32)
-    out[..., :3] = rgb
-    out[..., 3] = cached
-    return out
-
-
 class StageCanvas(QObject):
     """Renders tiles in mm stage coordinates."""
 
@@ -121,14 +92,8 @@ class StageCanvas(QObject):
             # Grayscale (H, W): use colormap and clim
             is_rgb = data.ndim == 3 and data.shape[2] in (3, 4)
             if is_rgb:
-                # Tack on a Hann-tapered alpha channel so overlapping tiles
-                # blend on the GPU instead of showing hard rectangular seams.
-                # Taper width = 6.25% of the smaller axis. Independent of
-                # stitcher params; visually negligible on isolated tiles.
-                if data.shape[2] == 3:
-                    data = _add_edge_alpha(data)
                 clim = (0.0, 1.0)
-                cmap = "grays"  # ignored for RGBA but vispy requires it
+                cmap = "grays"  # ignored for RGB but vispy requires it
             else:
                 clim = self._clim or (float(data.min()), float(data.max()))
                 cmap = self._cmap
