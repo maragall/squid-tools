@@ -3,26 +3,28 @@
 from __future__ import annotations
 
 import csv
-import json
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import tifffile
-import yaml
 
 from squid_tools.core.data_model import (
     Acquisition,
     AcquisitionChannel,
     AcquisitionFormat,
-    AcquisitionMode,
     FOVPosition,
     FrameKey,
-    ObjectiveMetadata,
     Region,
-    ScanConfig,
-    TimeSeriesConfig,
-    ZStackConfig,
+)
+from squid_tools.core.readers._squid_metadata import (
+    build_mode,
+    build_objective,
+    build_scan,
+    build_time_series,
+    build_z_stack,
+    channel_from_yaml,
+    load_yaml_and_json,
 )
 from squid_tools.core.readers.base import FormatReader
 
@@ -51,99 +53,22 @@ class IndividualImageReader(FormatReader):
 
     def read_metadata(self, path: Path) -> Acquisition:
         self._path = path
+        yaml_meta, json_params = load_yaml_and_json(path)
 
-        # Load acquisition.yaml if available
-        meta: dict[str, Any] = {}
-        if (path / "acquisition.yaml").exists():
-            with open(path / "acquisition.yaml") as f:
-                meta = yaml.safe_load(f) or {}
+        objective = build_objective(yaml_meta, json_params)
 
-        # Load acquisition parameters.json (always try)
-        params: dict[str, Any] = {}
-        params_file = path / "acquisition parameters.json"
-        if params_file.exists():
-            with open(params_file) as f:
-                params = json.load(f)
-
-        # Objective: prefer yaml, fall back to json
-        obj_meta = meta.get("objective", {})
-        obj_json = params.get("objective", {})
-        magnification = obj_meta.get("magnification") or obj_json.get("magnification", 1.0)
-        sensor_px = params.get("sensor_pixel_size_um", 7.52)
-        tube_lens_mm = params.get("tube_lens_mm", 180.0)
-        tube_lens_f = obj_json.get("tube_lens_f_mm", tube_lens_mm)
-        pixel_size = obj_meta.get("pixel_size_um") or (sensor_px / magnification)
-
-        objective = ObjectiveMetadata(
-            name=obj_meta.get("name") or obj_json.get("name", "unknown"),
-            magnification=magnification,
-            pixel_size_um=pixel_size,
-            numerical_aperture=obj_json.get("NA"),
-            sensor_pixel_size_um=sensor_px,
-            tube_lens_mm=tube_lens_mm,
-            tube_lens_f_mm=tube_lens_f,
-        )
-
-        # Channels: prefer yaml, fall back to auto-detect from filenames
         channels: list[AcquisitionChannel] = []
-        if meta.get("channels"):
-            for ch in meta["channels"]:
-                illum = ch.get("illumination_settings", {})
-                cam = ch.get("camera_settings", {})
-                channels.append(AcquisitionChannel(
-                    name=ch.get("name", ""),
-                    illumination_source=illum.get("illumination_channel", ""),
-                    illumination_intensity=illum.get("intensity", 0.0),
-                    exposure_time_ms=cam.get("exposure_time_ms", 0.0),
-                    z_offset_um=ch.get("z_offset_um", 0.0),
-                ))
+        if yaml_meta.get("channels"):
+            channels = [channel_from_yaml(ch) for ch in yaml_meta["channels"]]
         else:
-            # Auto-detect channels from filenames in timepoint 0
             channels = self._detect_channels_from_files(path / "0")
         self._channel_names = [ch.name for ch in channels]
 
-        # Mode
-        acq_meta = meta.get("acquisition", {})
-        widget_type = acq_meta.get("widget_type", "")
-        if widget_type in ("wellplate", "flexible"):
-            mode = AcquisitionMode(widget_type)
-        else:
-            mode = AcquisitionMode.MANUAL
-
-        # Scan config
-        scan = ScanConfig()
-        if "wellplate_scan" in meta:
-            scan = ScanConfig(overlap_percent=meta["wellplate_scan"].get("overlap_percent"))
-        elif "flexible_scan" in meta:
-            scan = ScanConfig(overlap_percent=meta["flexible_scan"].get("overlap_percent"))
-
-        # Z-stack: prefer yaml, fall back to json
-        z_stack = None
-        zs_meta = meta.get("z_stack", {})
-        nz = zs_meta.get("nz") or params.get("Nz", 1)
-        if nz > 0:
-            dz = zs_meta.get("delta_z_mm") or (params.get("dz(um)", 1.5) / 1000)
-            direction = (
-                "FROM_BOTTOM"
-                if zs_meta.get("config", "FROM_BOTTOM") == "FROM_BOTTOM"
-                else "FROM_TOP"
-            )
-            z_stack = ZStackConfig(
-                nz=nz, delta_z_mm=dz,
-                direction=direction,
-                use_piezo=zs_meta.get("use_piezo", False),
-            )
-
-        # Time series
-        time_series = None
-        ts_meta = meta.get("time_series", {})
-        nt = ts_meta.get("nt") or params.get("Nt", 1)
-        if nt > 0:
-            dt = ts_meta.get("delta_t_s") or params.get("dt(s)", 0.0)
-            time_series = TimeSeriesConfig(nt=nt, delta_t_s=dt)
-
-        # Regions from coordinates.csv
-        regions = self._parse_regions(path, meta)
+        mode = build_mode(yaml_meta)
+        scan = build_scan(yaml_meta)
+        z_stack = build_z_stack(yaml_meta, json_params)
+        time_series = build_time_series(yaml_meta, json_params)
+        regions = self._parse_regions(path, yaml_meta)
 
         return Acquisition(
             path=path, format=AcquisitionFormat.INDIVIDUAL_IMAGES, mode=mode,

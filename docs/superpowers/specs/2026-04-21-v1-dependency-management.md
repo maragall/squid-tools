@@ -1,5 +1,10 @@
 # v1 Dependency Management + Customer Module Installer
 
+> **Status (2026-04-24):** Deferred to v2. v1 bundles every plugin's runtime
+> deps in `pyproject.toml`'s core `dependencies` so `pip install squid-tools`
+> covers all 8 products. The split-install + questionnaire-driven installer
+> described below is a v2 effort once v1 has converged on functional testing.
+
 ## Purpose
 
 Users install squid-tools with the processing modules they need, not all of them. A microscopy lab that only stitches shouldn't carry deconvolution's CUDA wheels. A web demo shouldn't ship BaSiCPy. This document lays out how v1 packages its plugins so users (humans or agents) can compose installations at runtime, and how a customer-facing installer gives a researcher checkboxes instead of pip syntax.

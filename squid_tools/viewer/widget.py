@@ -40,9 +40,6 @@ class ViewerWidget(QWidget):
         self._tile_loader: AsyncTileLoader | None = None
         self._last_applied_id: int = 0
         self._updating_sliders: bool = False
-        # Channel indices where the user has touched the contrast slider.
-        # Auto-recompute skips these; "auto" button re-adds them.
-        self._user_tuned_channels: set[int] = set()
 
         self.selection = SelectionState(self)
         self._canvas.selection_drawn.connect(self._on_selection_drawn)
@@ -119,15 +116,15 @@ class ViewerWidget(QWidget):
         self._refresh_timer.setInterval(50)  # 50ms debounce
         self._refresh_timer.timeout.connect(self._refresh)
 
-        # Slower debounce: re-sample auto-contrast on channels the user
-        # hasn't manually tuned, so panning to a brighter region adapts.
-        self._autocontrast_timer = QTimer(self)
-        self._autocontrast_timer.setSingleShot(True)
-        self._autocontrast_timer.setInterval(500)  # 500ms: only after pan settles
-        self._autocontrast_timer.timeout.connect(self._recompute_auto_contrast)
-
         # Connect to canvas draw event for viewport-driven loading
         self._canvas.connect_draw(self._on_draw)
+        # Auto-contrast is sampled once at load (load_acquisition) over a
+        # representative slice of the whole region, then propagates to every
+        # zoom level unchanged. Per-channel "auto" buttons re-sample on
+        # demand. There is intentionally no viewport-driven re-sample —
+        # zooming would otherwise resample a smaller FOV subset and produce
+        # zoom-dependent brightness, which is exactly the bug we hit on the
+        # mouse-brain dataset.
 
     def load_acquisition(self, path: Path, region: str = "0") -> None:
         """Load acquisition and display the stage view."""
@@ -280,7 +277,9 @@ class ViewerWidget(QWidget):
             i for i, cb in enumerate(self._channel_checkboxes) if cb.isChecked()
         ]
         self._canvas.clear()
-        self._engine._display_cache.clear()
+        # Render cache misses naturally on the new active-channels signature;
+        # processed tiles for the now-hidden channel stay hot for instant
+        # re-enable.
         self._refresh()
 
     def _on_contrast_changed(self) -> None:
@@ -307,14 +306,19 @@ class ViewerWidget(QWidget):
             self._channel_value_labels[i].setText(
                 f"{clim_lo:.0f}..{clim_hi:.0f}",
             )
-            self._user_tuned_channels.add(i)
-        self._engine._display_cache.clear()
+        # Render cache misses naturally on the new clim signature.
         self._refresh()
 
     def _reset_channel_contrast(self, channel: int) -> None:
-        """Recompute auto-contrast for one channel and snap sliders."""
-        viewport = self._canvas.get_viewport()
-        visible = self._engine._index.query(*viewport) if self._engine._index else []
+        """Recompute auto-contrast for one channel from the whole region.
+
+        Mirrors the initial-load sampling so a user-clicked "auto" gives the
+        same result regardless of zoom level. Sampling from the visible
+        viewport instead would make zoom-state leak into clims, which is
+        the bug this whole pipeline was rewritten to fix.
+        """
+        bb = self._engine.bounding_box()
+        visible = self._engine._index.query(*bb) if self._engine._index else []
         fov_indices = [f.fov_index for f in visible] if visible else None
         p1, p99 = self._engine.compute_contrast(
             channel=channel,
@@ -323,37 +327,8 @@ class ViewerWidget(QWidget):
             fov_indices=fov_indices,
         )
         self._apply_auto_contrast_to_channel(channel, p1, p99)
-        # Re-opt this channel into viewport-follow auto-contrast.
-        self._user_tuned_channels.discard(channel)
-        self._engine._display_cache.clear()
+        # Render cache misses naturally on the new clim signature.
         self._refresh()
-
-    def _recompute_auto_contrast(self) -> None:
-        """Re-sample p1/p99 for every non-user-tuned channel from the
-        current viewport. Triggered after pan/zoom settles (500 ms).
-        """
-        if not self._engine.is_loaded():
-            return
-        viewport = self._canvas.get_viewport()
-        visible = self._engine._index.query(*viewport) if self._engine._index else []
-        if not visible:
-            return
-        fov_indices = [f.fov_index for f in visible]
-        changed = False
-        for ch_idx in self._active_channels:
-            if ch_idx in self._user_tuned_channels:
-                continue
-            p1, p99 = self._engine.compute_contrast(
-                channel=ch_idx,
-                z=self.z_slider.value(),
-                timepoint=self.t_slider.value(),
-                fov_indices=fov_indices,
-            )
-            self._apply_auto_contrast_to_channel(ch_idx, p1, p99)
-            changed = True
-        if changed:
-            self._engine._display_cache.clear()
-            self._refresh()
 
     def _apply_auto_contrast_to_channel(
         self, channel: int, clim_lo: float, clim_hi: float,
@@ -388,17 +363,16 @@ class ViewerWidget(QWidget):
         self._canvas.set_borders_visible(visible)
 
     def _on_draw(self, event: object) -> None:
-        """Canvas was drawn (after pan/zoom). Schedule a refresh + the
-        slower auto-contrast re-sample so contrast follows the viewport
-        when the user pans to a different brightness region."""
+        """Canvas painted. Schedule a tile refresh. Auto-contrast does NOT
+        fire here — clims are sampled once at load and stay stable across
+        pan/zoom so the look matches at every zoom level."""
         self._refresh_timer.start()
-        self._autocontrast_timer.start()
 
     def _on_slider_changed(self) -> None:
         """Z or T slider moved. Refresh composite. Preserve user clims."""
         self._update_nav_labels()
         self._canvas.clear()
-        self._engine._display_cache.clear()
+        # Render cache misses naturally on the new (z, timepoint) keys.
         self._refresh()
 
     def _refresh(self) -> None:

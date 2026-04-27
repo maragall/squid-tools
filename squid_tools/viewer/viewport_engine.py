@@ -43,7 +43,12 @@ class VisibleTile:
 class ViewportEngine:
     """Loads visible tiles on demand, downsampled to screen resolution."""
 
-    def __init__(self, cache_bytes: int = 256 * 1024 * 1024) -> None:
+    def __init__(
+        self,
+        cache_bytes: int = 256 * 1024 * 1024,
+        processed_cache_bytes: int | None = None,
+        render_cache_bytes: int | None = None,
+    ) -> None:
         self._acquisition: Acquisition | None = None
         self._reader: FormatReader | None = None
         self._index: SpatialIndex | None = None
@@ -53,17 +58,41 @@ class ViewportEngine:
         self._tile_h_px: int = 0
         self._region: str = ""
         self._raw_cache = MemoryBoundedLRUCache(max_bytes=cache_bytes)
-        self._display_cache: dict[str, np.ndarray] = {}
+        # Two-layer display caching (see
+        # docs/superpowers/specs/2026-04-26-viewer-cache-split-design.md):
+        # - _processed_tile_cache: per-channel float32 post-pipeline tiles,
+        #   keyed by (fov, channel, z, t, level, target_px). Survives clim
+        #   changes so contrast updates don't trigger reloads.
+        # - _render_cache: composited RGB tiles keyed by clim signature so
+        #   different clims naturally miss without explicit invalidation.
+        proc_budget = (
+            processed_cache_bytes if processed_cache_bytes is not None
+            else cache_bytes // 2
+        )
+        rend_budget = (
+            render_cache_bytes if render_cache_bytes is not None
+            else cache_bytes // 2
+        )
+        self._processed_tile_cache = MemoryBoundedLRUCache(max_bytes=proc_budget)
+        self._render_cache = MemoryBoundedLRUCache(max_bytes=rend_budget)
         self._pyramid_cache: dict[
             tuple[int, int, int, int, int], np.ndarray,
         ] = {}
-        self._last_screen_key: str = ""
         self._pipeline: list = []
         self._contrast: tuple[float, float] | None = None
         # Per-channel real data max from the most recent compute_contrast,
         # used by ViewerWidget to size the contrast slider's upper bound.
         self._last_sampled_max: dict[int, float] = {}
         self._position_overrides: dict[int, tuple[float, float]] = {}
+
+    def invalidate_render(self) -> None:
+        """Drop composited render cache; processed tiles survive."""
+        self._render_cache.clear()
+
+    def invalidate_processed(self) -> None:
+        """Drop processed and render caches; pipeline change."""
+        self._processed_tile_cache.clear()
+        self._render_cache.clear()
 
     def load(self, path: Path, region: str) -> None:
         """Load acquisition and build spatial index for a region."""
@@ -86,7 +115,7 @@ class ViewportEngine:
         self._index = SpatialIndex(region_obj, self._tile_w_mm, self._tile_h_mm)
 
         # Clear caches for new acquisition
-        self._display_cache.clear()
+        self.invalidate_processed()
         self._pyramid_cache.clear()
 
         try:
@@ -120,7 +149,7 @@ class ViewportEngine:
     def set_pipeline(self, transforms: list) -> None:
         """Set processing pipeline (toggle-based)."""
         self._pipeline = transforms
-        self._display_cache.clear()
+        self.invalidate_processed()
 
     def set_contrast(self, p1: float, p99: float) -> None:
         """Set global contrast range."""
@@ -132,12 +161,17 @@ class ViewportEngine:
         overrides: {fov_index: (new_x_mm, new_y_mm)}
         """
         self._position_overrides = overrides
-        self._display_cache.clear()
+        # Position overrides change tile placement, not pixel content. The
+        # processed cache is keyed per-tile so it stays valid; the render
+        # cache holds composited tile data that doesn't depend on stage
+        # position either, so it also stays valid. Render path picks up new
+        # positions from self._position_overrides at composite-time.
+        # No cache invalidation needed.
 
     def clear_position_overrides(self) -> None:
         """Revert to nominal positions."""
         self._position_overrides = {}
-        self._display_cache.clear()
+        # See set_position_overrides: positions are applied outside the cache.
 
     def register_visible_tiles(
         self,
@@ -237,34 +271,51 @@ class ViewportEngine:
         z: int = 0,
         timepoint: int = 0,
         fov_indices: list[int] | None = None,
-        max_samples: int = 10,
+        max_samples: int = 16,
     ) -> tuple[float, float]:
-        """Sample tiles to compute p1/p99 contrast.
+        """Sample tiles to compute p1/p99 contrast over the whole region.
 
-        When fov_indices is provided, sample only from those FOVs (viewport-only).
-        Falls back to sampling the first max_samples FOVs when fov_indices is None.
+        Strategy: random subset of up to max_samples FOVs (default 16) at
+        pyramid level MAX (stride-sliced, so values are a subset of raw
+        pixels and share the same distribution — p99 equals full-res p99
+        but reads ~1000× less data per tile). Random selection avoids
+        raster-scan corner bias. Seeded RNG means the same load produces
+        the same clims (reproducible).
+
+        Why 16 and not 42: this runs once per channel at startup before
+        the window paints. On z-stack OME-TIFFs each FOV file is hundreds
+        of MB; even with pyramid stride-slicing we still pay one disk
+        seek per (FOV × channel). 16 random FOVs spread across the region
+        gives a stable p99 in seconds rather than minutes on big datasets.
         """
         if self._acquisition is None or self._reader is None:
             return (0.0, 65535.0)
+
+        from squid_tools.viewer.pyramid import MAX_PYRAMID_LEVEL
 
         fovs = self._acquisition.regions[self._region].fovs
 
         if fov_indices is not None:
             fov_index_set = set(fov_indices)
-            sample_fovs = [f for f in fovs if f.fov_index in fov_index_set]
+            candidate_fovs = [f for f in fovs if f.fov_index in fov_index_set]
         else:
-            sample_fovs = fovs[:max_samples]
+            candidate_fovs = list(fovs)
 
-        # Limit to max_samples
-        sample_fovs = sample_fovs[:max_samples]
+        rng = np.random.default_rng(42)
+        if len(candidate_fovs) > max_samples:
+            picks = rng.choice(
+                len(candidate_fovs), size=max_samples, replace=False,
+            )
+            sample_fovs = [candidate_fovs[i] for i in sorted(picks.tolist())]
+        else:
+            sample_fovs = candidate_fovs
 
         pixels: list[np.ndarray] = []
-        rng = np.random.default_rng(42)
         for fov in sample_fovs:
-            frame = self._load_raw(fov.fov_index, z, channel, timepoint)
-            flat = frame.ravel()
-            idx = rng.choice(len(flat), min(1000, len(flat)), replace=False)
-            pixels.append(flat[idx])
+            frame = self._get_pyramid(
+                fov.fov_index, z, channel, timepoint, MAX_PYRAMID_LEVEL,
+            )
+            pixels.append(frame.ravel())
 
         if not pixels:
             return (0.0, 65535.0)
@@ -303,29 +354,25 @@ class ViewportEngine:
         # Clamp to full resolution
         target_tile_px = min(target_tile_px, self._tile_w_px)
 
-        screen_key = f"{target_tile_px}_{channel}_{z}_{timepoint}"
-        cache_invalidated = screen_key != self._last_screen_key
-        self._last_screen_key = screen_key
-
+        # Single-channel grayscale path uses only the processed-tile cache
+        # (no compositing, no clim-derived RGB to cache).
         tiles: list[VisibleTile] = []
         for fov in visible_fovs:
-            display_key = f"disp_{fov.fov_index}_{screen_key}"
-
-            if not cache_invalidated and display_key in self._display_cache:
-                data = self._display_cache[display_key]
-            else:
+            proc_key = (
+                f"proc_{fov.fov_index}_{channel}_{z}_{timepoint}_L0_{target_tile_px}"
+            )
+            data = self._processed_tile_cache.get(proc_key)
+            if data is None:
                 raw = self._load_raw(fov.fov_index, z, channel, timepoint)
-                # Apply pipeline
                 processed = raw.astype(np.float32)
                 for transform in self._pipeline:
                     processed = transform(processed)
-                # Downsample to screen resolution
                 if target_tile_px < self._tile_w_px:
                     factor = target_tile_px / self._tile_w_px
                     data = ndi_zoom(processed, factor, order=0)
                 else:
                     data = processed
-                self._display_cache[display_key] = data
+                self._processed_tile_cache.put(proc_key, data)
 
             pos = self._position_overrides.get(fov.fov_index, (fov.x_mm, fov.y_mm))
             tiles.append(VisibleTile(
@@ -384,48 +431,63 @@ class ViewportEngine:
         target_tile_px = min(target_tile_px, self._tile_w_px)
 
         ch_key = "_".join(str(c) for c in sorted(active_channels))
-        screen_key = f"comp_{target_tile_px}_{ch_key}_{z}_{timepoint}_L{level}"
-        cache_invalidated = screen_key != self._last_screen_key
-        self._last_screen_key = screen_key
+        # Clim signature: rounded int (lo, hi) per active channel in the
+        # same sort order as ch_key. Sub-tick rounding is below visible
+        # perceptual difference, so two slider positions that round to the
+        # same pair render identically (intentional).
+        clim_parts: list[str] = []
+        for c in sorted(active_channels):
+            lo, hi = channel_clims.get(c, (0.0, 65535.0))
+            clim_parts.append(f"{int(round(lo))}:{int(round(hi))}")
+        clim_sig = "_".join(clim_parts)
 
         tiles: list[VisibleTile] = []
         for fov in visible_fovs:
-            display_key = f"disp_{fov.fov_index}_{screen_key}"
-
-            if not cache_invalidated and display_key in self._display_cache:
-                data = self._display_cache[display_key]
-            else:
-                # Load and downsample each active channel
+            render_key = (
+                f"rend_{fov.fov_index}_{ch_key}_{clim_sig}"
+                f"_{z}_{timepoint}_L{level}_{target_tile_px}"
+            )
+            data = self._render_cache.get(render_key)
+            if data is None:
                 channel_data = []
                 for ch_idx in active_channels:
-                    raw = self._get_pyramid(fov.fov_index, z, ch_idx, timepoint, level)
-                    processed = raw.astype(np.float32)
-                    # Pipeline transforms (e.g. flatfield) operate on full-res
-                    # maps. At pyramid level > 0 the frame is already a
-                    # thumbnail; applying a full-res correction map here would
-                    # crash on a shape mismatch. Defer processing to level 0;
-                    # zoomed-out thumbnails show raw data.
-                    if level == 0:
-                        for transform in self._pipeline:
-                            processed = transform(processed)
-                    # For level 0, apply legacy screen-resolution downsampling;
-                    # for level >= 1, the pyramid frame is already smaller.
-                    if level == 0 and target_tile_px < self._tile_w_px:
-                        factor = target_tile_px / self._tile_w_px
-                        processed = ndi_zoom(processed, factor, order=0)
+                    proc_key = (
+                        f"proc_{fov.fov_index}_{ch_idx}_{z}_{timepoint}"
+                        f"_L{level}_{target_tile_px}"
+                    )
+                    processed = self._processed_tile_cache.get(proc_key)
+                    if processed is None:
+                        raw = self._get_pyramid(
+                            fov.fov_index, z, ch_idx, timepoint, level,
+                        )
+                        processed = raw.astype(np.float32)
+                        # Pipeline transforms (e.g. flatfield) operate on
+                        # full-res maps. At pyramid level > 0 the frame is
+                        # already a thumbnail; applying a full-res correction
+                        # map here would crash on a shape mismatch. Defer
+                        # processing to level 0; zoomed-out thumbnails show
+                        # raw data.
+                        if level == 0:
+                            for transform in self._pipeline:
+                                processed = transform(processed)
+                        if level == 0 and target_tile_px < self._tile_w_px:
+                            factor = target_tile_px / self._tile_w_px
+                            processed = ndi_zoom(processed, factor, order=0)
+                        self._processed_tile_cache.put(proc_key, processed)
 
-                    ch_name = channel_names[ch_idx] if ch_idx < len(channel_names) else ""
+                    ch_name = (
+                        channel_names[ch_idx]
+                        if ch_idx < len(channel_names) else ""
+                    )
                     default_clim = (float(processed.min()), float(processed.max()))
                     clim = channel_clims.get(ch_idx, default_clim)
                     channel_data.append((processed, ch_name, clim))
 
-                # Note: the compositor sums channel contributions and clips at [0, 1].
-                # Heavy multi-channel regions may saturate; adjust clims to compensate.
                 frames = [cd[0] for cd in channel_data]
                 colors = [get_channel_rgb(cd[1]) for cd in channel_data]
                 clims = [cd[2] for cd in channel_data]
                 data = composite_channels(frames, clims, colors)
-                self._display_cache[display_key] = data
+                self._render_cache.put(render_key, data)
 
             pos = self._position_overrides.get(fov.fov_index, (fov.x_mm, fov.y_mm))
             tiles.append(VisibleTile(

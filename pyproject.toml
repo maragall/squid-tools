@@ -7,10 +7,11 @@ name = "squid-tools"
 version = "1.0.0"
 description = "Post-processing connector for Cephla-Lab/Squid microscopy"
 requires-python = ">=3.10"
-# Core-only dependencies. Processing plugins pull their own algorithm deps
-# via optional extras below so users install only what they need. See
-# docs/superpowers/specs/2026-04-21-v1-dependency-management.md.
+# v1 ships the union of every plugin's runtime deps in core so a single
+# `pip install squid-tools` covers all 8 products. Per-plugin extras stay
+# declared (alias to core for now) so v2 can split them without a refactor.
 dependencies = [
+    # Core viewer + data model
     "pydantic>=2.10",
     "numpy>=1.24",
     "dask[array]>=2024.1",
@@ -19,33 +20,42 @@ dependencies = [
     "zarr>=2.16",
     "PySide6>=6.6",
     "vispy>=0.14",
+    # Stitching (vendored TileFusion)
+    "numba>=0.59",
+    "scikit-image>=0.22",
+    "scipy>=1.10",
+    "tensorstore>=0.1.50",
+    "pandas>=2.0",
+    "tqdm>=4.65",
+    # Background subtraction
+    "sep>=1.4",
+    # Remote (R2) + web demo
+    "boto3>=1.34",
+    "Pillow>=10.0",
 ]
 
 [project.optional-dependencies]
-# Processing-module extras: `pip install squid-tools[stitching,decon]`
-stitching  = ["numba>=0.59", "scikit-image>=0.22", "scipy>=1.10"]
-flatfield  = ["scipy>=1.10"]
-decon      = ["scikit-image>=0.22", "scipy>=1.10"]
+# Per-plugin extras kept for forward-compatibility with v2's split-install
+# story. In v1 they all resolve to the core install (everything is bundled).
+stitching  = []
+flatfield  = []
+decon      = []
 phase      = []                               # waveorder pulled lazily when used
-acns       = []                               # numpy only
-bgsub      = ["sep>=1.4"]
+acns       = []
+bgsub      = []
+r2         = []
+webdemo    = []
 
-# Remote + browser demo
-r2         = ["boto3>=1.34"]
-webdemo    = ["Pillow>=10.0"]
-
-# GPU-accelerated compositor + decon
+# GPU-accelerated compositor + decon (CUDA-only, opt-in)
 gpu        = ["cupy-cuda12x>=13.0"]
 
-# 3D volume viewer
-3d         = []                               # vispy is already core
+# 3D volume viewer (vispy already in core)
+3d         = []
 
-# Convenience bundles
-all-corrections = ["squid-tools[flatfield,acns,bgsub]"]
-all-restoration = ["squid-tools[decon,phase,acns]"]
-everything = [
-    "squid-tools[stitching,flatfield,decon,phase,acns,bgsub,r2,webdemo,3d]",
-]
+# Convenience aliases retained for muscle memory
+all-corrections = []
+all-restoration = []
+everything      = []
 
 # Dev only
 dev = [

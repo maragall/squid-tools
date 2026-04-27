@@ -230,6 +230,18 @@ class StageCanvas(QObject):
         """Connect to canvas draw event (fires after pan/zoom)."""
         self._canvas.events.draw.connect(callback)
 
+    def connect_viewport_user_change(self, callback: object) -> None:
+        """Connect to user-initiated viewport changes (mouse release, wheel).
+
+        Use this for work that should fire only when the user finishes an
+        interaction — not on every paint. Async tile arrivals also paint
+        the canvas, so anything wired to `connect_draw` will run on each
+        partial frame. Wiring auto-contrast to this hook avoids the
+        feedback loop where each contrast recompute triggers another paint.
+        """
+        self._canvas.events.mouse_release.connect(callback)
+        self._canvas.events.mouse_wheel.connect(callback)
+
 
 # ---------------------------------------------------------------------------
 # Legacy VispyCanvas kept for backward compatibility with existing tests.

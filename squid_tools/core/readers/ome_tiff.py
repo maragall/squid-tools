@@ -3,26 +3,29 @@
 from __future__ import annotations
 
 import csv
-import json
 from pathlib import Path
 from typing import Any, cast
 
 import numpy as np
 import tifffile
-import yaml
 
 from squid_tools.core.data_model import (
     Acquisition,
     AcquisitionChannel,
     AcquisitionFormat,
-    AcquisitionMode,
     FOVPosition,
     FrameKey,
-    ObjectiveMetadata,
     Region,
-    ScanConfig,
-    TimeSeriesConfig,
-    ZStackConfig,
+)
+from squid_tools.core.readers._squid_metadata import (
+    build_mode,
+    build_objective,
+    build_scan,
+    build_time_series,
+    build_z_stack,
+    channel_from_yaml,
+    load_yaml_and_json,
+    parse_channels_from_xml,
 )
 from squid_tools.core.readers.base import FormatReader
 
@@ -34,71 +37,34 @@ class OMETiffReader(FormatReader):
 
     @classmethod
     def detect(cls, path: Path) -> bool:
-        if not (path / "acquisition.yaml").exists():
-            return False
         ome_dir = path / "ome_tiff"
-        return ome_dir.is_dir() and bool(list(ome_dir.glob("*.ome.tiff")))
+        if not (ome_dir.is_dir() and any(ome_dir.glob("*.ome.tiff"))):
+            return False
+        has_yaml = (path / "acquisition.yaml").exists()
+        has_json = (path / "acquisition parameters.json").exists()
+        return has_yaml or has_json
 
     def read_metadata(self, path: Path) -> Acquisition:
         self._path = path
-        with open(path / "acquisition.yaml") as f:
-            meta = yaml.safe_load(f)
+        yaml_meta, json_params = load_yaml_and_json(path)
 
-        obj_meta = meta.get("objective", {})
-        objective = ObjectiveMetadata(
-            name=obj_meta.get("name", "unknown"),
-            magnification=obj_meta.get("magnification", 1.0),
-            pixel_size_um=obj_meta.get("pixel_size_um", 1.0),
-        )
-        params_file = path / "acquisition parameters.json"
-        if params_file.exists():
-            with open(params_file) as f:
-                params = json.load(f)
-            objective.sensor_pixel_size_um = params.get("sensor_pixel_size_um")
-            objective.tube_lens_mm = params.get("tube_lens_mm")
+        objective = build_objective(yaml_meta, json_params)
 
+        # Channels: YAML when present (canonical), else parse Squid's
+        # configurations.xml for <mode Selected="true"> entries.
         channels: list[AcquisitionChannel] = []
-        for ch in meta.get("channels", []):
-            illum = ch.get("illumination_settings", {})
-            cam = ch.get("camera_settings", {})
-            channels.append(AcquisitionChannel(
-                name=ch.get("name", ""),
-                illumination_source=illum.get("illumination_channel", ""),
-                illumination_intensity=illum.get("intensity", 0.0),
-                exposure_time_ms=cam.get("exposure_time_ms", 0.0),
-                z_offset_um=ch.get("z_offset_um", 0.0),
-            ))
-
-        acq_meta = meta.get("acquisition", {})
-        widget_type = acq_meta.get("widget_type", "wellplate")
-        if widget_type in ("wellplate", "flexible"):
-            mode = AcquisitionMode(widget_type)
+        if yaml_meta.get("channels"):
+            channels = [channel_from_yaml(ch) for ch in yaml_meta["channels"]]
         else:
-            mode = AcquisitionMode.MANUAL
+            xml_path = path / "configurations.xml"
+            if xml_path.exists():
+                channels = parse_channels_from_xml(xml_path)
 
-        scan = ScanConfig()
-        if "wellplate_scan" in meta:
-            scan = ScanConfig(overlap_percent=meta["wellplate_scan"].get("overlap_percent"))
-        elif "flexible_scan" in meta:
-            scan = ScanConfig(overlap_percent=meta["flexible_scan"].get("overlap_percent"))
-
-        z_stack = None
-        zs_meta = meta.get("z_stack", {})
-        if zs_meta.get("nz", 0) > 0:
-            z_stack = ZStackConfig(
-                nz=zs_meta["nz"], delta_z_mm=zs_meta.get("delta_z_mm", 0.001),
-                direction="FROM_BOTTOM" if zs_meta.get("config") == "FROM_BOTTOM" else "FROM_TOP",
-                use_piezo=zs_meta.get("use_piezo", False),
-            )
-
-        time_series = None
-        ts_meta = meta.get("time_series", {})
-        if ts_meta.get("nt", 0) > 0:
-            time_series = TimeSeriesConfig(
-                nt=ts_meta["nt"], delta_t_s=ts_meta.get("delta_t_s", 1.0)
-            )
-
-        regions = self._parse_regions_from_files(path, meta)
+        mode = build_mode(yaml_meta)
+        scan = build_scan(yaml_meta)
+        z_stack = build_z_stack(yaml_meta, json_params)
+        time_series = build_time_series(yaml_meta, json_params)
+        regions = self._parse_regions_from_files(path, yaml_meta)
 
         return Acquisition(
             path=path, format=AcquisitionFormat.OME_TIFF, mode=mode,
