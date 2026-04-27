@@ -66,6 +66,8 @@ bgsub      = "squid_tools.processing.bgsub.plugin:BackgroundSubtractPlugin"
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+# Vendored upstream code — track as-is, don't drift from upstream style.
+extend-exclude = ["squid_tools/processing/stitching/_tilefusion/**"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B", "SIM"]

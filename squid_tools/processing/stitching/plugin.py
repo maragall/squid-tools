@@ -218,118 +218,103 @@ class StitcherPlugin(ProcessingPlugin):
         return fused[0]  # return 2D
 
     def run_live(self, selection, engine, params, progress):
-        """Progressive pairwise registration with live position updates.
+        """Run the vendored TileFusion exactly as Cephla-Lab/stitcher's GUI does.
 
-        Mirrors `_audit/stitcher/src/tilefusion/core.py`'s pipeline:
-        find_adjacent_pairs → compute_pair_bounds → extract OVERLAP
-        patches → phase cross-correlation on the patches only. Earlier
-        live versions passed full tiles to register_pair_worker, which
-        cross-correlated mostly-non-overlapping image content and
-        produced garbage shifts that fed into the global optimizer.
+        Replaces our earlier hand-rolled re-implementation. We instantiate
+        the vendored `TileFusion`, call its high-level
+        `refine_tile_positions_with_cross_correlation()`, then
+        `optimize_shifts(method="TWO_ROUND_ITERATIVE", rel_thresh=0.5,
+        abs_thresh=2.0, iterative=True)` — those exact arguments are what
+        `_audit/stitcher/gui/app.py:241-243` uses on the same data shape.
+
+        `tf.global_offsets` (in pixels) is converted to mm and applied as
+        engine position overrides for the live viewer.
         """
-        from squid_tools.processing.stitching.optimization import (
-            links_from_pairwise_metrics,
-            two_round_optimization,
-        )
-        from squid_tools.processing.stitching.registration import (
-            compute_pair_bounds,
-            find_adjacent_pairs,
-            register_pair_worker,
-        )
+        from squid_tools.processing.stitching._tilefusion import TileFusion
 
-        # Phase 1: Find pairs + compute their overlap bounds
-        progress("Finding pairs", 0, 1)
-        indices = selection if selection else engine.all_fov_indices()
-        if len(indices) < 2:
-            progress("Finding pairs", 1, 1)
+        progress("Loading", 0, 1)
+        if engine._acquisition is None:
             return
 
-        nominal = engine.get_nominal_positions(indices)
-        pixel_size = engine.pixel_size_um
-        sorted_ids = sorted(nominal.keys())
-        positions_px = [
-            (nominal[i][1] * 1000.0 / pixel_size, nominal[i][0] * 1000.0 / pixel_size)
-            for i in sorted_ids
-        ]
-        sample_frame = engine.get_raw_frame(sorted_ids[0], z=0, channel=0, timepoint=0)
-        tile_shape = sample_frame.shape[:2]
-        pairs = find_adjacent_pairs(
-            positions_px, (1.0, 1.0), tile_shape, min_overlap=15,
+        # Channel + Z + T — fixed to channel 0 / mid-z / t=0 like the GUI.
+        nz = (
+            engine._acquisition.z_stack.nz
+            if engine._acquisition.z_stack else 1
         )
-        pair_bounds = compute_pair_bounds(pairs, tile_shape)
-        progress("Finding pairs", 1, 1)
-        if not pair_bounds:
-            logger.info("Stitcher: no overlap patches; nothing to register")
-            return
+        registration_z = nz // 2
 
-        # Phase 2: Register progressively on OVERLAP PATCHES (not full tiles)
-        total = len(pair_bounds)
-        logger.info(
-            "Stitcher: pairwise registration on %d tiles (%d pair patches)",
-            len(sorted_ids), total,
-        )
-        pairwise_metrics: dict[tuple[int, int], tuple[int, int, float]] = {}
-        accepted = 0
-        rejected = 0
-
-        for k, (i_pos, j_pos, by_i, bx_i, by_j, bx_j) in enumerate(pair_bounds):
-            progress("Registering", k, total)
-            frame_i = engine.get_raw_frame(
-                sorted_ids[i_pos], z=0, channel=0, timepoint=0,
-            ).astype("float32")
-            frame_j = engine.get_raw_frame(
-                sorted_ids[j_pos], z=0, channel=0, timepoint=0,
-            ).astype("float32")
-            patch_i = frame_i[by_i[0]:by_i[1], bx_i[0]:bx_i[1]]
-            patch_j = frame_j[by_j[0]:by_j[1], bx_j[0]:bx_j[1]]
-            df = (params.downsample_factor, params.downsample_factor)
-            result = register_pair_worker((
-                i_pos, j_pos, patch_i, patch_j, df,
-                params.ssim_window, params.ssim_threshold,
-                (params.max_shift_pixels, params.max_shift_pixels),
-            ))
-            _, _, dy_s, dx_s, score = result
-            if dy_s is None:
-                rejected += 1
-                continue
-            nom_dy = positions_px[j_pos][0] - positions_px[i_pos][0]
-            nom_dx = positions_px[j_pos][1] - positions_px[i_pos][1]
-            pairwise_metrics[(i_pos, j_pos)] = (
-                int(nom_dy + dy_s), int(nom_dx + dx_s), score,
-            )
-            accepted += 1
-        progress("Registering", total, total)
-        logger.info(
-            "Stitcher: registration accepted %d / rejected %d pairs",
-            accepted, rejected,
-        )
-
-        if not pairwise_metrics:
-            return
-
-        # Phase 3: Optimize & publish positions
-        logger.info("Stitcher: global optimization (%d positions)", len(sorted_ids))
-        progress("Optimizing", 0, 1)
-        links = links_from_pairwise_metrics(pairwise_metrics)
         try:
-            shifts = two_round_optimization(
-                links,
-                n_tiles=len(sorted_ids),
-                fixed_indices=[0],
-                rel_thresh=3.0, abs_thresh=50.0, iterative=False,
+            tf = TileFusion(
+                engine._acquisition.path,
+                downsample_factors=(
+                    params.downsample_factor, params.downsample_factor,
+                ),
+                channel_to_use=0,
+                registration_z=registration_z,
+                registration_t=0,
+                region=engine._region or None,
             )
-        except np.linalg.LinAlgError:
-            progress("Optimizing", 1, 1)
+        except Exception:
+            logger.exception("TileFusion construction failed")
             return
+
+        # Optionally restrict to user selection. If selection is set, swap
+        # tile_positions to the selected subset before registration so we
+        # don't waste work on FOVs the user excluded.
+        if selection:
+            indices = sorted(selection)
+            full_positions = list(tf._tile_positions)
+            tf._tile_positions = [full_positions[i] for i in indices]
+            tf.n_tiles = len(indices)
+            tf.position_dim = tf.n_tiles
+        else:
+            indices = list(range(len(tf._tile_positions)))
+
+        progress("Registering", 0, 1)
+        try:
+            tf.refine_tile_positions_with_cross_correlation()
+        except Exception:
+            logger.exception("TileFusion registration failed")
+            return
+        progress("Registering", 1, 1)
+
+        progress("Optimizing", 0, 1)
+        try:
+            tf.optimize_shifts(
+                method="TWO_ROUND_ITERATIVE",
+                rel_thresh=0.5,
+                abs_thresh=2.0,
+                iterative=True,
+            )
+        except Exception:
+            logger.exception("TileFusion optimize_shifts failed")
+            return
+        progress("Optimizing", 1, 1)
+
+        # Convert global_offsets (pixels) to mm, apply as position overrides
+        # against engine's nominal positions.
+        engine_pixel_um = engine.pixel_size_um
+        nominal = engine.get_nominal_positions(set(indices))
         overrides: dict[int, tuple[float, float]] = {}
-        for i, idx in enumerate(sorted_ids):
-            ox, oy = nominal[idx]
+        global_offsets = getattr(tf, "global_offsets", None)
+        if global_offsets is None:
+            logger.warning("Stitcher: no global_offsets after optimize_shifts")
+            return
+        for i, idx in enumerate(indices):
+            if idx not in nominal:
+                continue
+            nom_x, nom_y = nominal[idx]
+            dy_px = float(global_offsets[i, 0])
+            dx_px = float(global_offsets[i, 1])
             overrides[idx] = (
-                ox + float(shifts[i, 1]) * pixel_size / 1000.0,
-                oy + float(shifts[i, 0]) * pixel_size / 1000.0,
+                nom_x + dx_px * engine_pixel_um / 1000.0,
+                nom_y + dy_px * engine_pixel_um / 1000.0,
             )
         engine.set_position_overrides(overrides)
-        progress("Optimizing", 1, 1)
+        logger.info(
+            "Stitcher: applied %d position overrides via vendored TileFusion",
+            len(overrides),
+        )
 
     def fuse_region_to_array(
         self,
