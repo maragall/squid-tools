@@ -91,14 +91,6 @@ _audit/                           # reference repos (ignored): ndviewer_light,
 
 ## Architecture at a glance
 
-- **Development environment.** Squid-Tools is also where absorbed
-  algorithms live going forward. Once a repo is absorbed, its
-  upstream copy is a frozen reference (kept in `_audit/`); the
-  active development of that algorithm happens inside
-  `squid_tools/processing/<name>/`. `python -m squid_tools --dev
-  path/to/plugin.py` hot-loads a plugin module so iteration is
-  fast against real acquisitions. No round-tripping to the
-  original repo.
 - **Core.** Pure Pydantic v2 data model + lazy readers. No GUI dependency.
 - **Viewer.** Custom vispy + PySide6 continuous-zoom stage view. Single
   canvas, no mode switching. Pyramid + async tile loader for scale.

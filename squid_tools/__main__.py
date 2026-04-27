@@ -76,7 +76,11 @@ def main() -> None:
                 dev_console.run_test_cases(p)
             dev_console.show()
 
+    # Default geometry so saved state can't push us offscreen on macOS.
+    window.resize(1400, 900)
     window.show()
+    window.raise_()
+    window.activateWindow()
     sys.exit(app.exec())
 
 

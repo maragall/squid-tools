@@ -66,6 +66,12 @@ class TestLoggerWiring:
                 calls.append("MainWindow")
             def show(self):
                 pass
+            def resize(self, *a, **kw):
+                pass
+            def raise_(self):
+                pass
+            def activateWindow(self):  # noqa: N802 — Qt naming
+                pass
             def open_acquisition(self, *a, **kw):
                 pass
             controller = FakeController()

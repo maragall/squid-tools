@@ -218,17 +218,26 @@ class StitcherPlugin(ProcessingPlugin):
         return fused[0]  # return 2D
 
     def run_live(self, selection, engine, params, progress):
-        """Progressive pairwise registration with live position updates."""
+        """Progressive pairwise registration with live position updates.
+
+        Mirrors `_audit/stitcher/src/tilefusion/core.py`'s pipeline:
+        find_adjacent_pairs → compute_pair_bounds → extract OVERLAP
+        patches → phase cross-correlation on the patches only. Earlier
+        live versions passed full tiles to register_pair_worker, which
+        cross-correlated mostly-non-overlapping image content and
+        produced garbage shifts that fed into the global optimizer.
+        """
         from squid_tools.processing.stitching.optimization import (
             links_from_pairwise_metrics,
             two_round_optimization,
         )
         from squid_tools.processing.stitching.registration import (
+            compute_pair_bounds,
             find_adjacent_pairs,
             register_pair_worker,
         )
 
-        # Phase 1: Find pairs
+        # Phase 1: Find pairs + compute their overlap bounds
         progress("Finding pairs", 0, 1)
         indices = selection if selection else engine.all_fov_indices()
         if len(indices) < 2:
@@ -242,22 +251,28 @@ class StitcherPlugin(ProcessingPlugin):
             (nominal[i][1] * 1000.0 / pixel_size, nominal[i][0] * 1000.0 / pixel_size)
             for i in sorted_ids
         ]
-        # Pick any loaded frame to determine tile shape
         sample_frame = engine.get_raw_frame(sorted_ids[0], z=0, channel=0, timepoint=0)
         tile_shape = sample_frame.shape[:2]
         pairs = find_adjacent_pairs(
             positions_px, (1.0, 1.0), tile_shape, min_overlap=15,
         )
+        pair_bounds = compute_pair_bounds(pairs, tile_shape)
         progress("Finding pairs", 1, 1)
-        if not pairs:
+        if not pair_bounds:
+            logger.info("Stitcher: no overlap patches; nothing to register")
             return
 
-        # Phase 2: Register progressively
-        total = len(pairs)
-        logger.info("Stitcher: pairwise registration on %d tiles", len(sorted_ids))
+        # Phase 2: Register progressively on OVERLAP PATCHES (not full tiles)
+        total = len(pair_bounds)
+        logger.info(
+            "Stitcher: pairwise registration on %d tiles (%d pair patches)",
+            len(sorted_ids), total,
+        )
         pairwise_metrics: dict[tuple[int, int], tuple[int, int, float]] = {}
+        accepted = 0
+        rejected = 0
 
-        for k, (i_pos, j_pos, _dy, _dx, _ov_y, _ov_x) in enumerate(pairs):
+        for k, (i_pos, j_pos, by_i, bx_i, by_j, bx_j) in enumerate(pair_bounds):
             progress("Registering", k, total)
             frame_i = engine.get_raw_frame(
                 sorted_ids[i_pos], z=0, channel=0, timepoint=0,
@@ -265,20 +280,29 @@ class StitcherPlugin(ProcessingPlugin):
             frame_j = engine.get_raw_frame(
                 sorted_ids[j_pos], z=0, channel=0, timepoint=0,
             ).astype("float32")
+            patch_i = frame_i[by_i[0]:by_i[1], bx_i[0]:bx_i[1]]
+            patch_j = frame_j[by_j[0]:by_j[1], bx_j[0]:bx_j[1]]
             df = (params.downsample_factor, params.downsample_factor)
             result = register_pair_worker((
-                i_pos, j_pos, frame_i, frame_j, df,
+                i_pos, j_pos, patch_i, patch_j, df,
                 params.ssim_window, params.ssim_threshold,
                 (params.max_shift_pixels, params.max_shift_pixels),
             ))
             _, _, dy_s, dx_s, score = result
-            if dy_s is not None:
-                nom_dy = positions_px[j_pos][0] - positions_px[i_pos][0]
-                nom_dx = positions_px[j_pos][1] - positions_px[i_pos][1]
-                pairwise_metrics[(i_pos, j_pos)] = (
-                    int(nom_dy + dy_s), int(nom_dx + dx_s), score,
-                )
+            if dy_s is None:
+                rejected += 1
+                continue
+            nom_dy = positions_px[j_pos][0] - positions_px[i_pos][0]
+            nom_dx = positions_px[j_pos][1] - positions_px[i_pos][1]
+            pairwise_metrics[(i_pos, j_pos)] = (
+                int(nom_dy + dy_s), int(nom_dx + dx_s), score,
+            )
+            accepted += 1
         progress("Registering", total, total)
+        logger.info(
+            "Stitcher: registration accepted %d / rejected %d pairs",
+            accepted, rejected,
+        )
 
         if not pairwise_metrics:
             return
