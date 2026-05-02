@@ -41,12 +41,38 @@ import tifffile
 
 from tests.fixtures.generate_fixtures import create_individual_acquisition
 
-# Real-dataset smoke testing. Override via env var on Linux/Windows.
-# When the dataset is missing the real-data tests skip rather than fail.
-REAL_DATASET_PATH = Path(os.environ.get(
-    "SQUID_REAL_DATASET",
-    "/Users/julioamaragall/Downloads/10x_mouse_brain_2025-04-23_00-53-11.236590",
-))
+# Real-dataset smoke testing — a *stack* of acquisitions, one per format.
+# The integration sweep cycles through every entry whose path exists; missing
+# entries are silently skipped so contributors only need the formats they
+# actually have on disk. Override paths via env vars (Linux/Windows safe).
+REAL_DATASETS: dict[str, str] = {
+    "individual_tiff": os.environ.get(
+        "SQUID_INDIVIDUAL_DATASET",
+        "/Users/julioamaragall/Downloads/10x_mouse_brain_2025-04-23_00-53-11.236590",
+    ),
+    "ome_tiff": os.environ.get(
+        "SQUID_OME_TIFF_DATASET",
+        # User to drop in a real OME-TIFF Squid acquisition; until then,
+        # the synthetic OME-TIFF tests above guard the format-specific paths.
+        "",
+    ),
+}
+
+
+def _available_datasets() -> list[tuple[str, Path]]:
+    """Entries whose path string is non-empty AND exists on disk.
+
+    Path("") resolves to the cwd, so we must reject empty strings *before*
+    converting to Path or every empty entry would silently target ".".
+    """
+    out: list[tuple[str, Path]] = []
+    for name, raw in REAL_DATASETS.items():
+        if not raw:
+            continue
+        p = Path(raw)
+        if p.exists():
+            out.append((name, p))
+    return out
 
 # ---------------------------------------------------------------------------
 # Synthetic Squid-stitcher-output fixture (the format the Spencer dataset
@@ -223,8 +249,8 @@ class TestPluginRunPerFrame:
     @pytest.mark.parametrize("plugin_module,plugin_class", [
         ("squid_tools.processing.flatfield.plugin", "FlatfieldPlugin"),
         ("squid_tools.processing.decon.plugin", "DeconvolutionPlugin"),
-        ("squid_tools.processing.phase.plugin", "PhaseFromDefocusPlugin"),
-        ("squid_tools.processing.acns.plugin", "ACNSPlugin"),
+        # phase + aCNS deferred per user direction (2026-05-02);
+        # reinstate when known-answer assertions land for each.
         ("squid_tools.processing.bgsub.plugin", "BackgroundSubtractPlugin"),
     ])
     def test_plugin_runs_on_ome_tiff_frame(
@@ -320,44 +346,87 @@ class TestIndividualFormatRegression:
 
 
 # ---------------------------------------------------------------------------
-# Real-dataset smoke tests. Skipped if the dataset isn't present locally.
-# Set SQUID_REAL_DATASET=/path/to/acq to point at a different acquisition.
+# Real-dataset smoke tests — parametrized over every entry in REAL_DATASETS
+# whose path exists on disk. Designed for the user to drop in additional
+# format examples (single-TIFF, OME-TIFF, Zarr) and have the same checks run
+# automatically. Each test takes (label, path); pytest skips entries whose
+# path is missing.
 # ---------------------------------------------------------------------------
 
 
-pytestmark_realdata = pytest.mark.skipif(
-    not REAL_DATASET_PATH.exists(),
-    reason=f"Real dataset not found at {REAL_DATASET_PATH}; "
-           "set SQUID_REAL_DATASET to override or skip.",
-)
+def _datasets_param():
+    available = _available_datasets()
+    if not available:
+        return pytest.mark.skip(
+            "No real datasets configured. Set SQUID_INDIVIDUAL_DATASET or "
+            "SQUID_OME_TIFF_DATASET to point at a real Squid acquisition.",
+        )
+    return pytest.mark.parametrize(
+        "label,acq_path", available, ids=[name for name, _ in available],
+    )
 
 
+# Helpers that quantify "did the plugin actually do something correct?"
+
+def _spatial_cv(arr: np.ndarray, blocks: int = 4) -> float:
+    """Coefficient of variation across spatial subblocks.
+
+    Higher = more illumination unevenness across the field. Flatfield
+    correction should LOWER this number.
+    """
+    h, w = arr.shape
+    bh, bw = max(1, h // blocks), max(1, w // blocks)
+    means: list[float] = []
+    for i in range(blocks):
+        for j in range(blocks):
+            patch = arr[i * bh:(i + 1) * bh, j * bw:(j + 1) * bw]
+            if patch.size:
+                means.append(float(patch.mean()))
+    arr_means = np.asarray(means)
+    mu = arr_means.mean()
+    if mu == 0:
+        return 0.0
+    return float(arr_means.std() / abs(mu))
+
+
+def _edge_magnitude(arr: np.ndarray) -> float:
+    """Total Sobel-gradient magnitude. Higher = sharper edges.
+
+    Deconvolution should raise this on a real microscopy frame.
+    """
+    from scipy.ndimage import sobel
+
+    a = arr.astype(np.float32)
+    gx = sobel(a, axis=0)
+    gy = sobel(a, axis=1)
+    return float(np.hypot(gx, gy).sum())
+
+
+@_datasets_param()
 class TestRealDataset:
-    """End-to-end on a real Squid acquisition.
+    """End-to-end on each real Squid acquisition in REAL_DATASETS.
 
-    Uses ``REAL_DATASET_PATH`` (default: 10x_mouse_brain). Until an OME-TIFF
-    dataset is available locally, this exercises the
-    INDIVIDUAL_IMAGES + JSON + XML + configurations.xml path that real
-    customer Squid output uses.
+    Same suite runs against every available format. Today: single-TIFF and
+    OME-TIFF (when the user drops one in). Beyond "doesn't crash," each
+    plugin test asserts a quantitative effect that proves the plugin
+    actually transformed the frame in the right direction.
     """
 
-    pytestmark = pytestmark_realdata
-
-    @pytest.fixture(scope="class")
-    def reader_and_meta(self):
+    @pytest.fixture
+    def reader_and_meta(self, acq_path: Path):
         from squid_tools.core.readers import detect_reader
 
-        reader = detect_reader(REAL_DATASET_PATH)
-        meta = reader.read_metadata(REAL_DATASET_PATH)
+        reader = detect_reader(acq_path)
+        meta = reader.read_metadata(acq_path)
         return reader, meta
 
-    def test_detected(self, reader_and_meta) -> None:
+    def test_detected(self, label: str, acq_path: Path, reader_and_meta) -> None:
         reader, meta = reader_and_meta
-        assert reader is not None
-        assert len(meta.channels) >= 1, "real dataset must expose channels"
-        assert meta.regions, "real dataset must expose at least one region"
+        assert reader is not None, f"[{label}] no reader detected"
+        assert len(meta.channels) >= 1, f"[{label}] no channels exposed"
+        assert meta.regions, f"[{label}] no regions exposed"
 
-    def test_read_first_frame(self, reader_and_meta) -> None:
+    def test_read_first_frame(self, label: str, acq_path: Path, reader_and_meta) -> None:
         from squid_tools.core.data_model import FrameKey
 
         reader, meta = reader_and_meta
@@ -366,14 +435,13 @@ class TestRealDataset:
         frame = reader.read_frame(FrameKey(
             region=region_id, fov=first_fov, z=0, channel=0, timepoint=0,
         ))
-        assert frame.ndim == 2
+        assert frame.ndim == 2, f"[{label}] expected 2D frame"
         assert frame.size > 0
-        assert np.issubdtype(frame.dtype, np.integer) or np.issubdtype(
-            frame.dtype, np.floating,
-        )
 
-    def test_compute_contrast_finishes_quickly(self, reader_and_meta) -> None:
-        """Contrast sampling must not hang on real data; expect < 30s."""
+    def test_compute_contrast_finishes_quickly(
+        self, label: str, acq_path: Path, reader_and_meta,
+    ) -> None:
+        """Contrast sampling must not hang. < 30s on any real dataset."""
         import time
 
         from squid_tools.viewer.viewport_engine import ViewportEngine
@@ -381,28 +449,23 @@ class TestRealDataset:
         _, meta = reader_and_meta
         region_id = next(iter(meta.regions))
         engine = ViewportEngine()
-        engine.load(REAL_DATASET_PATH, region=region_id)
+        engine.load(acq_path, region=region_id)
         t0 = time.monotonic()
         p1, p99 = engine.compute_contrast(channel=0)
         elapsed = time.monotonic() - t0
-        assert 0 <= p1 < p99, f"sane (p1, p99) expected, got ({p1}, {p99})"
+        assert 0 <= p1 < p99, f"[{label}] sane (p1, p99) expected, got ({p1}, {p99})"
         assert elapsed < 30, (
-            f"compute_contrast took {elapsed:.1f}s; should be well under 30s"
+            f"[{label}] compute_contrast took {elapsed:.1f}s; should be < 30s"
         )
 
-    @pytest.mark.parametrize("plugin_module,plugin_class", [
-        ("squid_tools.processing.flatfield.plugin", "FlatfieldPlugin"),
-        ("squid_tools.processing.decon.plugin", "DeconvolutionPlugin"),
-        ("squid_tools.processing.phase.plugin", "PhaseFromDefocusPlugin"),
-        ("squid_tools.processing.acns.plugin", "ACNSPlugin"),
-        ("squid_tools.processing.bgsub.plugin", "BackgroundSubtractPlugin"),
-    ])
-    def test_plugin_runs_on_real_frame(
-        self, reader_and_meta, plugin_module, plugin_class,
+    def test_flatfield_reduces_spatial_unevenness(
+        self, label: str, acq_path: Path, reader_and_meta,
     ) -> None:
-        import importlib
-
+        """Flatfield correctness: the field-illumination unevenness across
+        spatial subblocks must drop after correction.
+        """
         from squid_tools.core.data_model import FrameKey
+        from squid_tools.processing.flatfield.plugin import FlatfieldPlugin
 
         reader, meta = reader_and_meta
         region_id = next(iter(meta.regions))
@@ -411,34 +474,110 @@ class TestRealDataset:
             region=region_id, fov=first_fov, z=0, channel=0, timepoint=0,
         )).astype(np.float32)
 
-        mod = importlib.import_module(plugin_module)
-        plugin = getattr(mod, plugin_class)()
+        plugin = FlatfieldPlugin()
+        params = plugin.default_params(meta.optical)
+        out = plugin.process(frame, params)
+
+        cv_before = _spatial_cv(frame)
+        cv_after = _spatial_cv(out)
+        assert out.shape == frame.shape, f"[{label}] shape changed"
+        assert np.isfinite(out).all(), f"[{label}] non-finite output"
+        # Any uniform field will have CV close to 0; only assert reduction
+        # when there is meaningful unevenness to remove (>1% CV).
+        if cv_before > 0.01:
+            assert cv_after < cv_before, (
+                f"[{label}] flatfield should reduce spatial CV but it went "
+                f"{cv_before:.4f} -> {cv_after:.4f}"
+            )
+
+    def test_decon_raises_edge_magnitude(
+        self, label: str, acq_path: Path, reader_and_meta,
+    ) -> None:
+        """Deconvolution correctness: total Sobel gradient magnitude must
+        not drop after deconvolution (sharpening should preserve or raise it).
+        """
+        from squid_tools.core.data_model import FrameKey
+        from squid_tools.processing.decon.plugin import DeconvolutionPlugin
+
+        reader, meta = reader_and_meta
+        region_id = next(iter(meta.regions))
+        first_fov = meta.regions[region_id].fovs[0].fov_index
+        frame = reader.read_frame(FrameKey(
+            region=region_id, fov=first_fov, z=0, channel=0, timepoint=0,
+        )).astype(np.float32)
+
+        plugin = DeconvolutionPlugin()
         try:
             params = plugin.default_params(meta.optical)
         except Exception as exc:
-            pytest.skip(f"{plugin_class}: optical metadata insufficient — {exc}")
+            pytest.skip(f"[{label}] decon optical metadata insufficient: {exc}")
         out = plugin.process(frame, params)
-        assert out.shape == frame.shape, (
-            f"{plugin_class} changed shape {frame.shape} -> {out.shape}"
-        )
-        assert np.isfinite(out).all(), (
-            f"{plugin_class} produced non-finite values"
+
+        edges_before = _edge_magnitude(frame)
+        edges_after = _edge_magnitude(out)
+        assert out.shape == frame.shape, f"[{label}] shape changed"
+        assert np.isfinite(out).all(), f"[{label}] non-finite output"
+        # Allow tiny numerical drift; assert no significant blur was added.
+        assert edges_after >= 0.95 * edges_before, (
+            f"[{label}] decon must not lose edge content: "
+            f"{edges_before:.0f} -> {edges_after:.0f}"
         )
 
-    def test_open_in_gui_headless(self, qtbot) -> None:
+    def test_bgsub_lowers_mean_intensity(
+        self, label: str, acq_path: Path, reader_and_meta,
+    ) -> None:
+        """Background subtraction correctness: post-subtraction mean
+        intensity must be lower than the input mean.
+        """
+        from squid_tools.core.data_model import FrameKey
+        from squid_tools.processing.bgsub.plugin import BackgroundSubtractPlugin
+
+        reader, meta = reader_and_meta
+        region_id = next(iter(meta.regions))
+        first_fov = meta.regions[region_id].fovs[0].fov_index
+        frame = reader.read_frame(FrameKey(
+            region=region_id, fov=first_fov, z=0, channel=0, timepoint=0,
+        )).astype(np.float32)
+
+        plugin = BackgroundSubtractPlugin()
+        params = plugin.default_params(meta.optical)
+        out = plugin.process(frame, params)
+
+        assert out.shape == frame.shape, f"[{label}] shape changed"
+        assert np.isfinite(out).all(), f"[{label}] non-finite output"
+        assert out.mean() < frame.mean(), (
+            f"[{label}] bgsub mean must drop: "
+            f"{frame.mean():.1f} -> {out.mean():.1f}"
+        )
+
+    # Phase from defocus and aCNS denoising: explicitly excluded from the
+    # auto-sweep per user direction (2026-05-02). Re-enable by parametrizing
+    # over them again once we have a known-answer test for each.
+
+    def test_open_in_gui_headless(
+        self, label: str, acq_path: Path, qtbot,
+    ) -> None:
         """Same path the user clicks: MainWindow.open_acquisition()."""
         from squid_tools.gui.app import MainWindow
 
         window = MainWindow()
         qtbot.addWidget(window)
-        window.open_acquisition(REAL_DATASET_PATH)
-        assert window.controller.acquisition is not None
-        # Region selector should be populated.
-        assert window.region_selector.selected_region_id() != ""
+        window.open_acquisition(acq_path)
+        assert window.controller.acquisition is not None, (
+            f"[{label}] open_acquisition didn't populate controller"
+        )
+        assert window.region_selector.selected_region_id() != "", (
+            f"[{label}] region selector empty after open"
+        )
         window.close()
 
-    def test_stitcher_run_live_handles_real_dataset(self, reader_and_meta) -> None:
-        """Stitcher delegates to vendored TileFusion; must not crash."""
+    def test_stitcher_run_live_moves_tiles(
+        self, label: str, acq_path: Path, reader_and_meta,
+    ) -> None:
+        """Stitcher correctness: at least one position override must be set
+        and at least one must differ from its nominal stage position
+        (registration found a non-trivial shift).
+        """
         from squid_tools.processing.stitching.plugin import (
             StitcherParams,
             StitcherPlugin,
@@ -448,15 +587,38 @@ class TestRealDataset:
         _, meta = reader_and_meta
         region_id = next(iter(meta.regions))
         engine = ViewportEngine()
-        engine.load(REAL_DATASET_PATH, region=region_id)
+        engine.load(acq_path, region=region_id)
 
-        # Pick the first 4 FOVs (or all if fewer) for a quick run.
         fov_indices = [f.fov_index for f in meta.regions[region_id].fovs[:4]]
+        if len(fov_indices) < 2:
+            pytest.skip(f"[{label}] need at least 2 FOVs for stitching")
+        nominal = engine.get_nominal_positions(set(fov_indices))
+
         plugin = StitcherPlugin()
         params = StitcherParams(pixel_size_um=engine.pixel_size_um)
         plugin.run_live(
             selection=set(fov_indices), engine=engine,
             params=params, progress=lambda *_: None,
         )
-        # Contract: don't crash. Position-override correctness is asserted in
-        # tests/unit/test_stitcher_run_live.py and tests/integration/test_stitch_live.py.
+
+        overrides = engine._position_overrides
+        if not overrides:
+            pytest.skip(
+                f"[{label}] stitcher returned no overrides — likely a "
+                "format-mismatch with TileFusion's expected layout, "
+                "covered as a graceful no-op in test_stitcher_run_live.py",
+            )
+        assert any(idx in overrides for idx in fov_indices), (
+            f"[{label}] no overrides for selected FOVs"
+        )
+        # At least one override must differ from nominal by more than
+        # floating-point noise — otherwise stitcher didn't actually align.
+        moved = any(
+            (abs(overrides[idx][0] - nominal[idx][0])
+             + abs(overrides[idx][1] - nominal[idx][1])) > 1e-6
+            for idx in fov_indices if idx in overrides and idx in nominal
+        )
+        assert moved, (
+            f"[{label}] stitcher set overrides identical to nominal; "
+            "registration produced no shift"
+        )

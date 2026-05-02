@@ -143,7 +143,22 @@ class IndividualImageReader(FormatReader):
     def read_frame(self, key: FrameKey) -> np.ndarray:
         if self._path is None:
             raise RuntimeError("Must call read_metadata before read_frame")
+        if not 0 <= key.channel < len(self._channel_names):
+            raise ValueError(
+                f"Channel index {key.channel} out of range "
+                f"[0, {len(self._channel_names)}); "
+                f"acquisition has {len(self._channel_names)} channel(s): "
+                f"{self._channel_names}",
+            )
         channel_name = self._channel_names[key.channel]
         fname = f"{key.region}_{key.fov}_{key.z}_{channel_name}.tiff"
         frame_path = self._path / str(key.timepoint) / fname
+        if not frame_path.exists():
+            raise FileNotFoundError(
+                f"Frame file not found at {frame_path}. "
+                f"FrameKey={key}. The acquisition's metadata expected this "
+                f"file but it is missing — likely a partial export or a "
+                f"channel-name mismatch between configurations.xml and "
+                f"the on-disk filenames.",
+            )
         return tifffile.imread(str(frame_path))
