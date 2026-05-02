@@ -349,15 +349,10 @@ class TestViewportEngineGetVolume:
         with pytest.raises(RuntimeError, match="No acquisition"):
             engine.get_volume(fov=0, channel=0, timepoint=0)
 
-    def test_all_volumes_for_region(self, individual_acquisition) -> None:
-        from squid_tools.viewer.viewport_engine import ViewportEngine
-
-        engine = ViewportEngine()
-        engine.load(individual_acquisition, "0")
-        volumes = engine.all_volumes_for_region(channel=0, timepoint=0)
-        assert set(volumes.keys()) == engine.all_fov_indices()
-        for v in volumes.values():
-            assert v.ndim == 3
+    # all_volumes_for_region was removed in v1 — it was unbounded
+    # (~48 GB on the mouse-brain dataset, no GUI binding). Streaming
+    # whole-region volume access is a v2 task; see
+    # docs/superpowers/specs/2026-04-26-streaming-region-ops-v2.md.
 
 
 class TestViewportEngineVoxelSize:

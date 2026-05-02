@@ -526,7 +526,19 @@ class ViewportEngine:
         timepoint: int = 0,
         level: int = 0,
     ) -> np.ndarray:
-        """Return the Z-stack for (fov, channel, timepoint) as (Z, Y, X)."""
+        """Return the Z-stack for (fov, channel, timepoint) as (Z, Y, X).
+
+        Single-FOV only; intentionally not extended to all-FOV regions.
+        For a 2048x2048 uint16 stack with nz=10 each call materializes
+        ~80 MB. The 3D viewer (widget_3d.py) calls this once per active
+        channel for the user-selected FOV — bounded.
+
+        Whole-region 3D rendering is a v2 streaming-volume task (see
+        docs/superpowers/specs/2026-04-26-streaming-region-ops-v2.md).
+        Do NOT add a multi-FOV variant here without the streaming model
+        in place — the prior all_volumes_for_region helper would have
+        loaded ~48 GB on the mouse-brain dataset.
+        """
         if self._acquisition is None:
             raise RuntimeError("No acquisition loaded")
         z_stack = self._acquisition.z_stack
@@ -536,18 +548,6 @@ class ViewportEngine:
             for z in range(nz)
         ]
         return np.stack(planes, axis=0)
-
-    def all_volumes_for_region(
-        self,
-        channel: int,
-        timepoint: int = 0,
-        level: int = 0,
-    ) -> dict[int, np.ndarray]:
-        """Return {fov_index: volume} for every FOV in the current region."""
-        return {
-            fov_index: self.get_volume(fov_index, channel, timepoint, level)
-            for fov_index in sorted(self.all_fov_indices())
-        }
 
     def voxel_size_um(self) -> tuple[float, float, float]:
         """(vx, vy, vz) in micrometers — xy from the objective, z from z_stack."""
