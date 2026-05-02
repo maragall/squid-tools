@@ -34,6 +34,9 @@ class OMETiffReader(FormatReader):
     def __init__(self) -> None:
         self._path: Path | None = None
         self._fov_files: dict[tuple[str, int], Path] = {}
+        # Memory-mapped per-FOV arrays. Keyed by (region, fov). Holds file
+        # handles open via mmap; OS pages in only the bytes we slice.
+        self._mmap_cache: dict[tuple[str, int], np.ndarray] = {}
 
     @classmethod
     def detect(cls, path: Path) -> bool:
@@ -114,14 +117,23 @@ class OMETiffReader(FormatReader):
         if file_key not in self._fov_files:
             raise FileNotFoundError(f"No OME-TIFF for region={key.region}, fov={key.fov}")
         fpath = self._fov_files[file_key]
-        with tifffile.TiffFile(str(fpath)) as tif:
-            data = cast(np.ndarray, tif.asarray())
-            # tifffile may squeeze singleton T dimension; use actual ndim to index
-            # Full TZCYX = 5 dims; squeezed ZCYX = 4 dims
-            if data.ndim == 5:
-                return data[key.timepoint, key.z, key.channel]  # type: ignore[no-any-return]
-            elif data.ndim == 4:
-                # T was squeezed (nt=1); axes are ZCYX
-                return data[key.z, key.channel]  # type: ignore[no-any-return]
-            else:
-                raise ValueError(f"Unexpected OME-TIFF array ndim={data.ndim} in {fpath}")
+        # Memory-map the file once per FOV. The OS pages in only the bytes
+        # we slice; without this the previous tif.asarray() pulled the whole
+        # multi-hundred-MB z-stack into RAM on every single frame request,
+        # making compute_contrast at startup do tens of GB of disk I/O on
+        # OME-TIFF datasets and the GUI never paint.
+        if file_key not in self._mmap_cache:
+            self._mmap_cache[file_key] = cast(
+                np.ndarray, tifffile.memmap(str(fpath), mode="r"),
+            )
+        arr = self._mmap_cache[file_key]
+        if arr.ndim == 5:
+            plane = arr[key.timepoint, key.z, key.channel]
+        elif arr.ndim == 4:
+            # T was squeezed (nt=1); axes are ZCYX
+            plane = arr[key.z, key.channel]
+        else:
+            raise ValueError(f"Unexpected OME-TIFF array ndim={arr.ndim} in {fpath}")
+        # np.asarray copies the slice out of the memmap so downstream code
+        # can hold the data after the mmap is closed.
+        return cast(np.ndarray, np.asarray(plane))
