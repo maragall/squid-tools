@@ -150,16 +150,12 @@ class MainWindow(QMainWindow):
             self.controller.registry.register(DeconvolutionPlugin())
         except ImportError:
             pass
-        try:
-            from squid_tools.processing.phase.plugin import PhaseFromDefocusPlugin
-            self.controller.registry.register(PhaseFromDefocusPlugin())
-        except ImportError:
-            pass
-        try:
-            from squid_tools.processing.acns.plugin import ACNSPlugin
-            self.controller.registry.register(ACNSPlugin())
-        except ImportError:
-            pass
+        # Phase from defocus and aCNS denoising are shelved for v1 — no
+        # known-answer correctness assertion exists for either, so they are
+        # not registered into the GUI. Plugin code is preserved under
+        # squid_tools.processing.{phase,acns}/ for v2 to re-enable. See
+        # docs/superpowers/specs/2026-04-21-v2-design.md cycle B (algo
+        # coverage) for the re-enable plan.
         try:
             from squid_tools.processing.bgsub.plugin import (
                 BackgroundSubtractPlugin,

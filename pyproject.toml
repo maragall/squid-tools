@@ -69,9 +69,9 @@ dev = [
 flatfield  = "squid_tools.processing.flatfield.plugin:FlatfieldPlugin"
 stitcher   = "squid_tools.processing.stitching.plugin:StitcherPlugin"
 decon      = "squid_tools.processing.decon.plugin:DeconvolutionPlugin"
-phase      = "squid_tools.processing.phase.plugin:PhaseFromDefocusPlugin"
-acns       = "squid_tools.processing.acns.plugin:ACNSPlugin"
 bgsub      = "squid_tools.processing.bgsub.plugin:BackgroundSubtractPlugin"
+# phase + acns shelved for v1; re-enable in v2 once correctness asserts
+# land. Plugin code remains under squid_tools.processing.{phase,acns}/.
 
 [tool.ruff]
 line-length = 100
