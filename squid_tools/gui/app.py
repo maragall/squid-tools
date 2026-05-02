@@ -9,6 +9,7 @@ One continuous viewer. No mode switching.
 
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
 
@@ -365,9 +366,21 @@ class MainWindow(QMainWindow):
         self.log_panel.log(f"[{plugin_name}] Complete.")
         # Record in the OME sidecar manifest.
         self._record_sidecar_run(plugin_name, tiles_processed, status="ok")
-        # Refresh viewer so position overrides / pipeline changes show
+        # Refresh viewer so position overrides / pipeline changes show.
+        # If the plugin installed a pipeline transform that shifts the
+        # pixel value distribution (e.g. bg-sub drops mean intensity),
+        # the previous clims will no longer match the displayed range —
+        # the viewport would render near-black tiles and the user would
+        # think nothing happened. Recompute auto-contrast against the
+        # post-pipeline distribution before re-rendering.
         if self._viewer is not None:
             self._viewer._canvas.clear()
+            try:
+                self._viewer.recompute_clims_post_pipeline()
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "post-run clim recompute failed; falling back to old clims",
+                )
             self._viewer._refresh()
 
     def _record_sidecar_run(

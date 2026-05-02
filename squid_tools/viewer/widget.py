@@ -330,6 +330,27 @@ class ViewerWidget(QWidget):
         # Render cache misses naturally on the new clim signature.
         self._refresh()
 
+    def recompute_clims_post_pipeline(self) -> None:
+        """Re-sample p1/p99 *with the engine pipeline applied* and update
+        every active channel's clims + slider.
+
+        Called after a plugin run that installs a pipeline transform shifting
+        the value distribution (bg-sub subtracts a background mean; decon
+        rescales). Without this, post-pipeline tiles render near-black
+        because the slider still targets pre-pipeline values — the user
+        sees no apparent change and thinks the plugin failed.
+        """
+        if not self._engine.is_loaded():
+            return
+        for ch_idx in self._active_channels:
+            p1, p99 = self._engine.compute_contrast(
+                channel=ch_idx,
+                z=self.z_slider.value(),
+                timepoint=self.t_slider.value(),
+                apply_pipeline=True,
+            )
+            self._apply_auto_contrast_to_channel(ch_idx, p1, p99)
+
     def _apply_auto_contrast_to_channel(
         self, channel: int, clim_lo: float, clim_hi: float,
     ) -> None:

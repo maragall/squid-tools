@@ -345,6 +345,40 @@ class TestIndividualFormatRegression:
         assert 0 <= p1 < p99
 
 
+class TestPipelineAwareContrast:
+    """compute_contrast must reflect the post-pipeline value distribution
+    when apply_pipeline=True; otherwise running bg-sub renders near-black
+    tiles because clims still target pre-subtraction intensities."""
+
+    def test_compute_contrast_apply_pipeline_picks_up_subtraction(
+        self, tmp_path: Path,
+    ) -> None:
+        from squid_tools.viewer.viewport_engine import ViewportEngine
+
+        acq = create_individual_acquisition(
+            tmp_path / "acq", nx=2, ny=2, nz=1, nc=1, nt=1,
+        )
+        engine = ViewportEngine()
+        engine.load(acq, region="0")
+
+        # Subtract a value larger than the fixture's max (uint16 0..4095).
+        # Post-pipeline pixels are guaranteed negative; raw pixels are
+        # guaranteed non-negative. Direction is unambiguous regardless of
+        # the per-level sampling-stride differences in compute_contrast.
+        engine.set_pipeline([lambda f: f.astype(np.float32) - 10000.0])
+        post_p1, post_p99 = engine.compute_contrast(channel=0, apply_pipeline=True)
+        raw_p1, raw_p99 = engine.compute_contrast(channel=0, apply_pipeline=False)
+
+        assert post_p1 < 0 <= raw_p1, (
+            f"apply_pipeline must reflect a constant subtraction in p1: "
+            f"raw_p1={raw_p1:.1f}, post_p1={post_p1:.1f}"
+        )
+        assert post_p99 < raw_p99, (
+            f"apply_pipeline must reflect a constant subtraction in p99: "
+            f"raw_p99={raw_p99:.1f}, post_p99={post_p99:.1f}"
+        )
+
+
 class TestBrittlenessGuards:
     """Quick checks that the helpful errors fire instead of opaque crashes."""
 

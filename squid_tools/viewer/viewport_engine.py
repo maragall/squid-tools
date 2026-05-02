@@ -283,6 +283,7 @@ class ViewportEngine:
         timepoint: int = 0,
         fov_indices: list[int] | None = None,
         max_samples: int = 16,
+        apply_pipeline: bool = False,
     ) -> tuple[float, float]:
         """Sample tiles to compute p1/p99 contrast over the whole region.
 
@@ -321,12 +322,25 @@ class ViewportEngine:
         else:
             sample_fovs = candidate_fovs
 
+        # Pipeline transforms (e.g. flatfield) often expect full-res input
+        # because they reference full-res correction maps. When the caller
+        # asks for pipeline-aware contrast we have to load full-res frames.
+        # That's slower but only fires after a plugin-run-complete event,
+        # not on every paint.
+        sample_level = 0 if apply_pipeline else MAX_PYRAMID_LEVEL
+
         pixels: list[np.ndarray] = []
         for fov in sample_fovs:
             frame = self._get_pyramid(
-                fov.fov_index, z, channel, timepoint, MAX_PYRAMID_LEVEL,
+                fov.fov_index, z, channel, timepoint, sample_level,
             )
-            pixels.append(frame.ravel())
+            if apply_pipeline and self._pipeline:
+                processed = frame.astype(np.float32)
+                for transform in self._pipeline:
+                    processed = transform(processed)
+                pixels.append(processed.ravel())
+            else:
+                pixels.append(frame.ravel())
 
         if not pixels:
             return (0.0, 65535.0)
