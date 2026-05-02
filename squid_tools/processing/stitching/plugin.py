@@ -71,15 +71,34 @@ class StitcherPlugin(ProcessingPlugin):
         if len(frames) == 1:
             return next(iter(frames.values()))
 
-        # Build position array (y, x) in pixels
+        # Build position array (y, x) in pixels. Drop frames whose
+        # fov_index has no matching FOVPosition rather than crashing with
+        # KeyError — happens when frames + positions disagree on FOV count
+        # (e.g. partial selection, mismatched region geometry, FOVs missing
+        # from coordinates.csv).
         pos_map = {p.fov_index: p for p in positions}
-        tile_indices = sorted(frames.keys())
+        tile_indices: list[int] = []
         tile_positions_px: list[tuple[float, float]] = []
-        for idx in tile_indices:
-            p = pos_map[idx]
+        for idx in sorted(frames.keys()):
+            p = pos_map.get(idx)
+            if p is None:
+                logger.warning(
+                    "Stitcher: dropping FOV %d — no position metadata "
+                    "in `positions` argument", idx,
+                )
+                continue
+            tile_indices.append(idx)
             y_px = p.y_mm * 1000 / params.pixel_size_um
             x_px = p.x_mm * 1000 / params.pixel_size_um
             tile_positions_px.append((y_px, x_px))
+
+        if not tile_indices:
+            logger.warning(
+                "Stitcher: no FOVs had matching positions; nothing to stitch",
+            )
+            return None
+        if len(tile_indices) == 1:
+            return frames[tile_indices[0]]
 
         # Get tile shape (assume all same size)
         sample = frames[tile_indices[0]]

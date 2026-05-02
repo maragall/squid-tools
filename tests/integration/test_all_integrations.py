@@ -345,6 +345,89 @@ class TestIndividualFormatRegression:
         assert 0 <= p1 < p99
 
 
+class TestBrittlenessGuards:
+    """Quick checks that the helpful errors fire instead of opaque crashes."""
+
+    def test_individual_reader_channel_oob_raises_value_error(
+        self, tmp_path: Path,
+    ) -> None:
+        from squid_tools.core.data_model import FrameKey
+        from squid_tools.core.readers.individual import IndividualImageReader
+
+        acq = create_individual_acquisition(
+            tmp_path / "acq", nx=1, ny=1, nz=1, nc=1, nt=1,
+        )
+        reader = IndividualImageReader()
+        reader.read_metadata(acq)
+        with pytest.raises(ValueError, match="Channel index 5 out of range"):
+            reader.read_frame(FrameKey(
+                region="0", fov=0, z=0, channel=5, timepoint=0,
+            ))
+
+    def test_individual_reader_missing_frame_raises_with_path(
+        self, tmp_path: Path,
+    ) -> None:
+        import os
+
+        from squid_tools.core.data_model import FrameKey
+        from squid_tools.core.readers.individual import IndividualImageReader
+
+        acq = create_individual_acquisition(
+            tmp_path / "acq", nx=1, ny=1, nz=1, nc=1, nt=1,
+        )
+        reader = IndividualImageReader()
+        meta = reader.read_metadata(acq)
+        # Delete one frame to trigger the missing-file path.
+        ch = meta.channels[0].name
+        target = acq / "0" / f"0_0_0_{ch}.tiff"
+        os.remove(target)
+        with pytest.raises(FileNotFoundError, match=str(target)):
+            reader.read_frame(FrameKey(
+                region="0", fov=0, z=0, channel=0, timepoint=0,
+            ))
+
+    def test_viewport_engine_empty_fovs_raises_value_error(
+        self, tmp_path: Path,
+    ) -> None:
+        """An acquisition whose region has no FOVs must surface a clear error."""
+        import csv
+
+        from squid_tools.viewer.viewport_engine import ViewportEngine
+
+        acq = create_individual_acquisition(
+            tmp_path / "acq", nx=2, ny=2, nz=1, nc=1, nt=1,
+        )
+        # Truncate coordinates.csv to header only.
+        coords = acq / "0" / "coordinates.csv"
+        with open(coords, newline="") as f:
+            header = next(csv.reader(f))
+        with open(coords, "w", newline="") as f:
+            csv.writer(f).writerow(header)
+
+        engine = ViewportEngine()
+        # Either "has no FOVs" or "Region '0' not found" is acceptable —
+        # the parser may not create the empty-FOV region at all. Both
+        # cases must yield a clear ValueError naming the region.
+        with pytest.raises(ValueError, match="(has no FOVs|not found)"):
+            engine.load(acq, region="0")
+
+    def test_ome_tiff_reader_channel_oob_raises_value_error(
+        self, tmp_path: Path,
+    ) -> None:
+        from squid_tools.core.data_model import FrameKey
+        from squid_tools.core.readers.ome_tiff import OMETiffReader
+
+        acq = _create_squid_ome_tiff_acquisition(
+            tmp_path / "acq", nc=2,
+        )
+        reader = OMETiffReader()
+        reader.read_metadata(acq)
+        with pytest.raises(ValueError, match="channel index 5 out of range"):
+            reader.read_frame(FrameKey(
+                region="0", fov=0, z=0, channel=5, timepoint=0,
+            ))
+
+
 # ---------------------------------------------------------------------------
 # Real-dataset smoke tests — parametrized over every entry in REAL_DATASETS
 # whose path exists on disk. Designed for the user to drop in additional

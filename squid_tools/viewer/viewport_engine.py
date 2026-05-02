@@ -100,8 +100,19 @@ class ViewportEngine:
         self._acquisition = self._reader.read_metadata(path)
         self._region = region
 
-        # Get tile dimensions from first FOV
+        if region not in self._acquisition.regions:
+            available = sorted(self._acquisition.regions.keys())
+            raise ValueError(
+                f"Region {region!r} not found in acquisition at {path}. "
+                f"Available regions: {available}",
+            )
         region_obj = self._acquisition.regions[region]
+        if not region_obj.fovs:
+            raise ValueError(
+                f"Region {region!r} in acquisition at {path} has no FOVs. "
+                f"This usually means coordinates.csv is empty, malformed, "
+                f"or doesn't reference any FOVs for this region.",
+            )
         first_fov = region_obj.fovs[0]
         key = FrameKey(region=region, fov=first_fov.fov_index, z=0, channel=0, timepoint=0)
         first_frame = self._reader.read_frame(key)

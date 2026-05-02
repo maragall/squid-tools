@@ -40,7 +40,19 @@ def main() -> None:
     logging.getLogger("squid_tools").info("Logging to %s", log_dir)
 
     import os  # noqa: PLC0415
-    os.environ.setdefault("QT_QPA_PLATFORM", os.environ.get("QT_QPA_PLATFORM", ""))
+
+    # On Linux without a display server (e.g. headless SSH session), the
+    # `xcb` Qt plugin will segfault or hang silently on QApplication init.
+    # Surface a clear, actionable error instead. Set
+    # QT_QPA_PLATFORM=offscreen to bypass for headless test runs.
+    if sys.platform.startswith("linux") and not os.environ.get("QT_QPA_PLATFORM"):
+        if not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY"):
+            sys.stderr.write(
+                "squid-tools needs a display (DISPLAY or WAYLAND_DISPLAY). "
+                "Over SSH? try `ssh -X`. Headless tests? "
+                "`QT_QPA_PLATFORM=offscreen python -m squid_tools <acq_dir>`.\n",
+            )
+            sys.exit(1)
 
     from pathlib import Path  # noqa: PLC0415
 

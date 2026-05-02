@@ -112,6 +112,18 @@ class OMETiffReader(FormatReader):
                             ))
         return regions
 
+    @staticmethod
+    def _validate_index(
+        key: FrameKey, axis: str, idx: int, size: int, fpath: Path,
+    ) -> None:
+        if not 0 <= idx < size:
+            raise ValueError(
+                f"OME-TIFF {axis} index {idx} out of range [0, {size}) "
+                f"for FrameKey={key} in {fpath}. The on-disk array's "
+                f"{axis} axis has only {size} entries — likely a "
+                f"truncated export or a metadata mismatch.",
+            )
+
     def read_frame(self, key: FrameKey) -> np.ndarray:
         file_key = (key.region, key.fov)
         if file_key not in self._fov_files:
@@ -128,9 +140,16 @@ class OMETiffReader(FormatReader):
             )
         arr = self._mmap_cache[file_key]
         if arr.ndim == 5:
+            nt, nz, nc = arr.shape[:3]
+            self._validate_index(key, "timepoint", key.timepoint, nt, fpath)
+            self._validate_index(key, "z", key.z, nz, fpath)
+            self._validate_index(key, "channel", key.channel, nc, fpath)
             plane = arr[key.timepoint, key.z, key.channel]
         elif arr.ndim == 4:
             # T was squeezed (nt=1); axes are ZCYX
+            nz, nc = arr.shape[:2]
+            self._validate_index(key, "z", key.z, nz, fpath)
+            self._validate_index(key, "channel", key.channel, nc, fpath)
             plane = arr[key.z, key.channel]
         else:
             raise ValueError(f"Unexpected OME-TIFF array ndim={arr.ndim} in {fpath}")
