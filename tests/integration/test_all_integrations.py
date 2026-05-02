@@ -633,6 +633,58 @@ class TestRealDataset:
             f"{frame.mean():.1f} -> {out.mean():.1f}"
         )
 
+    @pytest.mark.parametrize("plugin_module,plugin_class,tag_attr", [
+        ("squid_tools.processing.bgsub.plugin", "BackgroundSubtractPlugin", "_is_bgsub"),
+        ("squid_tools.processing.decon.plugin", "DeconvolutionPlugin", "_is_decon"),
+        ("squid_tools.processing.flatfield.plugin", "FlatfieldPlugin", "_is_flatfield"),
+    ])
+    def test_run_live_installs_pipeline_transform(
+        self, label: str, acq_path: Path, plugin_module, plugin_class, tag_attr,
+    ) -> None:
+        """run_live must wire the plugin into engine._pipeline so the live
+        viewer sees the effect — not just compute and discard a frame.
+
+        This is the "bg sub doesn't work in the GUI" guard: per-frame plugins
+        whose run_live used the base implementation silently no-op'd in the
+        viewer because the base discards results.
+        """
+        import importlib
+
+        from squid_tools.viewer.viewport_engine import ViewportEngine
+
+        _, meta = reader_and_meta = (None, None)
+        from squid_tools.core.readers import detect_reader
+
+        reader = detect_reader(acq_path)
+        meta = reader.read_metadata(acq_path)
+        region_id = next(iter(meta.regions))
+        engine = ViewportEngine()
+        engine.load(acq_path, region=region_id)
+
+        mod = importlib.import_module(plugin_module)
+        plugin = getattr(mod, plugin_class)()
+        try:
+            params = plugin.default_params(meta.optical)
+        except Exception as exc:
+            pytest.skip(f"[{label}] {plugin_class}: optical metadata insufficient — {exc}")
+
+        before = list(engine._pipeline)
+        plugin.run_live(
+            selection=None, engine=engine, params=params,
+            progress=lambda *_: None,
+        )
+        after = list(engine._pipeline)
+
+        new_transforms = [t for t in after if t not in before]
+        assert new_transforms, (
+            f"[{label}] {plugin_class}.run_live did not install any transform "
+            f"into engine._pipeline; the live viewer will see no effect"
+        )
+        assert any(getattr(t, tag_attr, False) for t in new_transforms), (
+            f"[{label}] {plugin_class}.run_live installed a transform without "
+            f"the {tag_attr} marker; re-running will stack duplicates"
+        )
+
     # Phase from defocus and aCNS denoising: explicitly excluded from the
     # auto-sweep per user direction (2026-05-02). Re-enable by parametrizing
     # over them again once we have a known-answer test for each.

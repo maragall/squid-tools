@@ -70,6 +70,33 @@ class BackgroundSubtractPlugin(ProcessingPlugin):
         np.clip(out, 0.0, None, out=out)
         return out.astype(np.float32)
 
+    def run_live(self, selection, engine, params, progress):
+        """Install per-tile background subtraction into the engine pipeline.
+
+        The base run_live computes per-frame results and discards them, so
+        the user sees no visible change in the live viewer. We override to
+        install the subtraction as a pipeline transform — every tile the
+        viewer composites runs through it, and the cache split caches
+        post-subtraction tiles so panning/zooming stays interactive.
+        """
+        progress("Installing", 0, 1)
+
+        p = params if isinstance(params, BackgroundSubtractParams) else BackgroundSubtractParams(
+            **params.model_dump(),
+        )
+
+        def _bgsub_transform(frame):
+            return self.process(frame, p)
+
+        existing = list(engine._pipeline)
+        existing = [t for t in existing if not getattr(t, "_is_bgsub", False)]
+        _bgsub_transform._is_bgsub = True  # type: ignore[attr-defined]
+        existing.append(_bgsub_transform)
+        engine.set_pipeline(existing)
+
+        logger.info("BgSub: installed per-tile transform (box_size=%d)", p.box_size)
+        progress("Installing", 1, 1)
+
     def test_cases(self) -> list[dict[str, Any]]:
         # A uniform image plus a tiny signal should subtract to near-zero
         # background (plus the signal preserved).

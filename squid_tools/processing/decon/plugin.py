@@ -125,6 +125,38 @@ class DeconvolutionPlugin(ProcessingPlugin):
         out = np.clip(out, 0.0, 1.0) * (hi - lo) + lo
         return out.astype(np.float32)
 
+    def run_live(self, selection, engine, params, progress):
+        """Install per-tile Richardson-Lucy deconvolution into the engine
+        pipeline.
+
+        The base run_live throws results away. We install a pipeline
+        transform so the live viewer sees deconvolved tiles. The processed-
+        tile cache (cache split refactor) keeps re-renders cheap once each
+        visible tile has been deconvolved once.
+        """
+        progress("Installing", 0, 1)
+
+        p = params if isinstance(params, DeconvolutionParams) else DeconvolutionParams(
+            **params.model_dump(),
+        )
+
+        def _decon_transform(frame):
+            return self.process(frame, p)
+
+        existing = list(engine._pipeline)
+        existing = [t for t in existing if not getattr(t, "_is_decon", False)]
+        _decon_transform._is_decon = True  # type: ignore[attr-defined]
+        existing.append(_decon_transform)
+        engine.set_pipeline(existing)
+
+        import logging
+        logging.getLogger(__name__).info(
+            "Decon: installed per-tile transform "
+            "(wavelength=%.0f, NA=%.2f, iterations=%d)",
+            p.wavelength_nm, p.numerical_aperture, p.iterations,
+        )
+        progress("Installing", 1, 1)
+
     def test_cases(self) -> list[dict[str, Any]]:
         """Synthetic test: a blurred pixel should sharpen toward the input."""
         sharp = np.zeros((31, 31), dtype=np.float32)

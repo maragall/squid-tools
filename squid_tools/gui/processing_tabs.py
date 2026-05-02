@@ -191,7 +191,7 @@ class _PluginTab(QWidget):
         top_row.addWidget(self._run_button)
 
         self._status_label = QLabel("Not calibrated")
-        self._status_label.setStyleSheet("color: #888888; font-size: 11px;")
+        self._status_label.setStyleSheet("color: #888888; font-size: 12px;")
         top_row.addWidget(self._status_label, stretch=1)
         layout.addLayout(top_row)
 
@@ -203,7 +203,12 @@ class _PluginTab(QWidget):
         form = QFormLayout()
         form.setContentsMargins(0, 0, 0, 0)
         form.setHorizontalSpacing(8)
-        form.setVerticalSpacing(2)
+        form.setVerticalSpacing(4)
+        # Wrap long rows: when the label + widget don't fit the 190-px
+        # side column, render the label on its own line above the widget
+        # instead of truncating. Keeps params readable without widening
+        # the column (which would shrink the canvas).
+        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
         params_cls = plugin.parameters()
         for field_name, field_info in params_cls.model_fields.items():
             annotation = field_info.annotation
@@ -257,7 +262,7 @@ class _PluginTab(QWidget):
         if manifest and manifest.notes:
             notes_label = QLabel(manifest.notes)
             notes_label.setWordWrap(True)
-            notes_label.setStyleSheet("color: #888888; font-size: 10px;")
+            notes_label.setStyleSheet("color: #888888; font-size: 11px;")
             layout.addWidget(notes_label)
 
         layout.addStretch()
